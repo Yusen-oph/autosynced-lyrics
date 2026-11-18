@@ -27,6 +27,7 @@ import lyrics as lyrics_api
 import paths
 import updater
 import song_offsets
+import sources
 from media_watcher import PLAYER_CHOICES
 from overlay import ANIMATIONS
 
@@ -356,8 +357,17 @@ class AppServer:
         return str(get("title") or "").strip(), str(get("artist") or "").strip()
 
     def _matching_track(self, title, artist):
+        """The playing track if the editor's song is it (so its length can pick the right
+        version online). Small differences (case, spaces, "feat." or a remaster tag) still count."""
         t = self.app.watcher.track
-        return t if t is not None and (t.title, t.artist) == (title, artist) else None
+        if t is None:
+            return None
+        same = lambda a, b: (a or "").strip().casefold() == (b or "").strip().casefold()
+        if same(t.title, title) and same(t.artist, artist):
+            return t
+        if sources._similar(t.title, title) >= 0.85 and sources._similar(t.artist, artist) >= 0.7:
+            return t
+        return None
 
     def _get_editor_load(self, q):
         title, artist = self._song_args(q)
