@@ -6,6 +6,7 @@
 3. align() matches the lyric words to the heard words (fuzzy, in order) and gives each
    line a start time. Lines it couldn't hear are estimated and flagged as guesses.
 """
+import os
 import re
 import threading
 import time
@@ -188,6 +189,9 @@ def play_audio(x: np.ndarray, sr: int = 16000) -> None:
 
 # ---- 2. transcription ------------------------------------------------------
 _model_cache = {}
+# Whisper would use every core by default (half the CPU or more on a 12-thread PC). A few
+# threads are plenty: the editor's auto-sync is a bit slower but the PC stays responsive.
+CPU_THREADS = max(2, min(4, (os.cpu_count() or 4) // 4))
 
 
 def transcribe(audio: np.ndarray, model_size: str, progress=lambda f, msg: None):
@@ -198,14 +202,29 @@ def transcribe(audio: np.ndarray, model_size: str, progress=lambda f, msg: None)
         progress(0.0, f"Loading the {model_size} model (downloads once, {MODEL_SIZES[model_size].split(',')[0]})…")
         MODELS_DIR.mkdir(parents=True, exist_ok=True)
         _model_cache[model_size] = WhisperModel(model_size, device="cpu", compute_type="int8",
-                                                download_root=str(MODELS_DIR))
+                                                cpu_threads=CPU_THREADS, download_root=str(MODELS_DIR))
     model = _model_cache[model_size]
+    try:
+        return _transcribe(model, audio, progress)
+    finally:
+        release_models()                # the model takes 200-500 MB: don't keep it around
+
+
+def release_models() -> None:
+    _model_cache.clear()
+    import gc
+    gc.collect()
+
+
+def _transcribe(model, audio, progress):
+    """Run the model; returns the heard words (see transcribe)."""
 
     # Loopback audio is often quiet; normalising helped recognition in testing.
     audio = (audio / max(1e-6, float(np.abs(audio).max())) * 0.9).astype(np.float32)
     progress(0.0, "Listening to the recording…")
     segments, info = model.transcribe(audio, word_timestamps=True, condition_on_previous_text=False,
-                                      vad_filter=False, beam_size=5)
+                                      vad_filter=False, beam_size=3,
+                                      temperature=(0.0, 0.4, 0.8))   # default retries up to 5 times
     words = []
     for n, seg in enumerate(segments):
         progress(min(0.99, seg.end / max(1.0, info.duration)), "Listening to the recording…")

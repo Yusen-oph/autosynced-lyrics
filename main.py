@@ -435,6 +435,8 @@ class App:
         spent_ms = (time.perf_counter() - started) * 1000
         self.root.after(max(1, round(16 - spent_ms)) if animating else 16, self._tick)
 
+    RETIME_ENOUGH = 12      # lines measured before the timing fix is considered settled
+
     def _set_learn_target(self, track, lyr, words_on, fix_on):
         wanted = [i for i, (_, text) in enumerate(lyr.lines)
                   if words_on and lyrics_api._squash(text) and not lyrics_api.has_word_timing(lyr, i)]
@@ -449,6 +451,8 @@ class App:
         ready = track is not None and lyr is not None and lyr.synced and lyr.extras_loaded
         words_on = bool(ready and self.settings["learn_word_timing"] and self.settings["bouncing_note"])
         # Only lyrics found online get re-timed: ones you synced yourself are left as they are.
+        if lyr is not None and len(lyr.heard_starts) >= self.RETIME_ENOUGH:
+            lyr.retime_done = True               # enough to know the timing: stop listening for it
         fix_on = bool(ready and self.settings["fix_timing_by_listening"] and lyr.online
                       and not lyr.retime_done)
         self.learner.enabled = words_on or fix_on

@@ -21,7 +21,7 @@ import paths
 
 APP_NAME = "Autosynced Lyrics"
 EXE_NAME = f"{APP_NAME}.exe"
-VERSION = "2.4"
+VERSION = "2.5"
 INSTALL_DIR = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "Programs" / APP_NAME
 UNINSTALL_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\AutosyncedLyrics"
 DECLINED = paths.DATA_DIR / "install_declined"

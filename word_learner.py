@@ -22,6 +22,7 @@ OVERLAP = 1.5          # re-hear the end of the previous pass (words cut in half
 KEEP = 45.0            # seconds of audio kept in memory
 MIN_MATCHED = 0.4      # share of a line's words that must be heard to trust its timing
 BIAS = 0.1             # Whisper's word starts come slightly early
+UNLOAD_AFTER = 60.0    # s with nothing to learn before the speech model is freed (~200 MB)
 
 
 def _resample_16k(audio: np.ndarray, rate: int) -> np.ndarray:
@@ -191,10 +192,17 @@ class WordLearner(threading.Thread):
     def run(self):
         import pyaudiowpatch as pa
         stream = p = None
+        idle_since = time.monotonic()
         while True:
             time.sleep(1.0)
             with self._lock:
                 target = self._target if self.enabled else None
+            if target is None and self._model is not None and time.monotonic() - idle_since > UNLOAD_AFTER:
+                self._model = None               # give the memory back until the next song needs it
+                import gc
+                gc.collect()
+            if target is not None:
+                idle_since = time.monotonic()
             if target is None:
                 if stream is not None:      # nothing to learn: stop listening
                     stream.stop_stream(); stream.close(); p.terminate()
@@ -278,11 +286,18 @@ class WordLearner(threading.Thread):
         if self._model is None:
             from faster_whisper import WhisperModel
             autosync.MODELS_DIR.mkdir(parents=True, exist_ok=True)
+            # One thread, greedy decoding: about 8% of a 12-thread CPU for ~10 s per 20 s of
+            # song (measured), still keeping up with the music. More threads only made it
+            # finish sooner, at several times the CPU.
             self._model = WhisperModel(model_name(), device="cpu", compute_type="int8",
-                                       cpu_threads=2, download_root=str(autosync.MODELS_DIR))
+                                       cpu_threads=1, download_root=str(autosync.MODELS_DIR))
         audio = (audio / max(1e-6, float(np.abs(audio).max())) * 0.9).astype(np.float32)
         segments, _ = self._model.transcribe(audio, word_timestamps=True,
-                                             condition_on_previous_text=False, beam_size=3)
+                                             condition_on_previous_text=False, beam_size=1,
+                                             # Unsure passes are re-decoded at most once (Whisper's
+                                             # default retries up to 5 times: on loud music that
+                                             # alone could double or triple the CPU time).
+                                             temperature=(0.0, 0.5))
         heard = []
         for seg in segments:
             if seg.no_speech_prob > 0.6 and seg.avg_logprob < -0.8:
