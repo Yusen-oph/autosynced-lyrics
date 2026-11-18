@@ -1,0 +1,27 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# build output (published as GitHub releases instead)
+build/
+dist/
+*.apk
+
+# Android build files and this PC's SDK path
+android/local.properties
+android/.gradle/
+android/.kotlin/
+android/build/
+android/app/build/
+android/.idea/
+
+# personal data, never committed (it lives in %APPDATA%\AutosyncedLyrics anyway)
+*.lrc
+settings.json
+*.db
+ai_usage.json
+ai_store.json
+*.key
+.env
+.claude/
