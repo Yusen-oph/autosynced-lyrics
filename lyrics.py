@@ -353,6 +353,35 @@ def _query(title: str, artist: str, album: str, duration: float) -> dict | None:
     return None
 
 
+def _search(title: str, artist: str) -> list:
+    """LRCLIB search by title and singer together: once with them as separate fields, and
+    once as one "title singer" text search (finds entries whose names are written a bit
+    differently, e.g. "A & B" vs "A, B"). Results merged, each version once.
+    Raises requests errors only if both searches fail."""
+    clean = _NOISE.sub("", title).strip() or title
+    queries = [{"track_name": clean, "artist_name": artist}]
+    if artist:
+        queries.append({"q": f"{clean} {artist}"})
+    jobs = [sources.pool.submit(sources.http.get, f"{API}/search", params=q, headers=HEADERS, timeout=10)
+            for q in queries]
+    out, seen, errors = [], set(), []
+    for job in jobs:
+        try:
+            r = job.result()
+            r.raise_for_status()
+            items = r.json()
+        except (requests.RequestException, ValueError) as exc:
+            errors.append(exc)
+            continue
+        for x in items if isinstance(items, list) else []:
+            if x.get("id") not in seen:
+                seen.add(x.get("id"))
+                out.append(x)
+    if len(errors) == len(jobs) and isinstance(errors[0], requests.RequestException):
+        raise errors[0]
+    return out
+
+
 def _rank(results: list, title: str, artist: str, duration: float) -> list:
     """LRCLIB search results, best first: synced, then the closest length. Results by
     someone else (a different song with the same name) and ones more than 15 s off the
@@ -376,11 +405,8 @@ def _closer_version(exact: dict, title: str, artist: str, duration: float) -> di
     off = abs((exact.get("duration") or 0) - duration) if duration else 0
     if off <= 1.0:
         return exact
-    clean = _NOISE.sub("", title).strip() or title
     try:
-        r = sources.http.get(f"{API}/search", params={"track_name": clean, "artist_name": artist},
-                             headers=HEADERS, timeout=10)
-        results = r.json() if r.ok else []
+        results = _search(title, artist)
     except (requests.RequestException, ValueError):
         return exact
     better = [x for x in results if x.get("syncedLyrics")
@@ -402,11 +428,8 @@ def _lrclib(title: str, artist: str, album: str, duration: float) -> dict | None
 
     # No synced lyrics from the exact match (none at all, or only untimed ones):
     # fuzzy search, prefer synced results with the closest duration.
-    clean = _NOISE.sub("", title).strip() or title
     try:
-        r = sources.http.get(f"{API}/search", params={"track_name": clean, "artist_name": artist},
-                         headers=HEADERS, timeout=10)
-        results = r.json() if r.ok else []
+        results = _search(title, artist)
     except (requests.RequestException, ValueError):
         if exact:
             return exact
@@ -498,7 +521,6 @@ def delete_user(title: str, artist: str) -> None:
 def search_online(title: str, artist: str, duration: float = 0, album: str = "") -> dict | None:
     """Best match for the editor: LRCLIB's exact match for this track's length (the same
     one the app shows), else the closest-length version by this artist, then other sites."""
-    clean = _NOISE.sub("", title).strip() or title
     if duration:
         try:
             r = sources.http.get(f"{API}/get", params={"track_name": title, "artist_name": artist,
@@ -509,10 +531,7 @@ def search_online(title: str, artist: str, duration: float = 0, album: str = "")
             exact = None
         if exact and exact.get("syncedLyrics"):
             return {**_closer_version(exact, title, artist, duration), "source": "LRCLIB"}
-    r = sources.http.get(f"{API}/search", params={"track_name": clean, "artist_name": artist},
-                     headers=HEADERS, timeout=10)
-    r.raise_for_status()
-    results = _rank(r.json(), title, artist, duration)
+    results = _rank(_search(title, artist), title, artist, duration)
     best = {**results[0], "source": "LRCLIB"} if results else None
     if best and best.get("syncedLyrics"):
         return best
