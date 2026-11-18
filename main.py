@@ -82,6 +82,8 @@ class App:
             # First run with this option: on if a speech model is already downloaded
             # (you've used auto-sync), off otherwise so nobody gets a surprise download.
             self.settings["learn_word_timing"] = word_learner.have_model()
+        if self.settings["fix_timing_by_listening"] is None:
+            self.settings["fix_timing_by_listening"] = word_learner.have_model()
         self.root = tk.Tk()
         self.root.withdraw()  # hidden owner; the overlay and settings are Toplevels
         self.root.iconbitmap(default=str(tray.ensure_ico()))
@@ -433,25 +435,34 @@ class App:
         spent_ms = (time.perf_counter() - started) * 1000
         self.root.after(max(1, round(16 - spent_ms)) if animating else 16, self._tick)
 
+    def _set_learn_target(self, track, lyr, words_on, fix_on):
+        wanted = [i for i, (_, text) in enumerate(lyr.lines)
+                  if words_on and lyrics_api._squash(text) and not lyrics_api.has_word_timing(lyr, i)]
+        measure = [i for i, (_, text) in enumerate(lyr.lines)
+                   if fix_on and i not in lyr.heard_starts
+                   and len(word_learner.word_slots(text)) >= word_learner.MEASURE_MIN_WORDS]
+        self.learner.set_target(track.key, lyr.lines, wanted, measure)
+
     def _learn(self, track):
         """Learn word timing by listening, for lines no site had it for (see word_learner)."""
         lyr = self.lyrics
-        on = bool(self.settings["learn_word_timing"] and self.settings["bouncing_note"]
-                  and track is not None and lyr is not None and lyr.synced and lyr.extras_loaded)
-        self.learner.enabled = on
-        if not on:
+        ready = track is not None and lyr is not None and lyr.synced and lyr.extras_loaded
+        words_on = bool(ready and self.settings["learn_word_timing"] and self.settings["bouncing_note"])
+        # Only lyrics found online get re-timed: ones you synced yourself are left as they are.
+        fix_on = bool(ready and self.settings["fix_timing_by_listening"] and lyr.online
+                      and not lyr.retime_done)
+        self.learner.enabled = words_on or fix_on
+        if not (words_on or fix_on):
             self._learn_key = None
             return
-        key = (track.key, id(lyr))
+        key = (track.key, id(lyr), words_on, fix_on)
         if key != self._learn_key:               # new song / lyrics: tell it what's missing
             self._learn_key = key
-            wanted = [i for i, (_, text) in enumerate(lyr.lines)
-                      if lyrics_api._squash(text) and not lyrics_api.has_word_timing(lyr, i)]
-            self.learner.set_target(track.key, lyr.lines, wanted)
-        changed = False
+            self._set_learn_target(track, lyr, words_on, fix_on)
+        changed = moved = False
         while True:
             try:
-                song, found = self.learner.results.get_nowait()
+                song, found, starts = self.learner.results.get_nowait()
             except queue.Empty:
                 break
             if song != track.key or self.lyrics is not lyr:
@@ -459,7 +470,18 @@ class App:
             for i, chars in found.items():
                 if i < len(lyr.char_times) and not lyr.char_times[i]:
                     lyr.char_times[i] = chars
+                    lyr.heard_lines.add(i)
                     changed = True
+            if starts and fix_on:
+                lyr.heard_starts.update(starts)
+                if lyrics_api.apply_retime(lyr):
+                    changed = moved = True
+        if moved:
+            # Your own earlier/later fix for this song was making up for the same delay.
+            if song_offsets.get(track.title, track.artist):
+                song_offsets.nudge(track.title, track.artist, -song_offsets.get(track.title, track.artist))
+            self._set_learn_target(track, lyr, words_on, fix_on)   # it matches against the new times
+            self._note_line = None
         if changed:
             self._note_line = None               # the note switches to the learned timing
             if self.settings["cache_lyrics"]:

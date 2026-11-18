@@ -73,6 +73,8 @@ class SettingsWindow:
                        "(uses some CPU while a new song plays; needs a speech model)",
                     "learn_word_timing")
         self._section(p, "Timing")
+        self._check(p, "Fix badly timed lyrics by listening\n"
+                       "(lyrics found online for another version of the song)", "fix_timing_by_listening")
         self._spin(p, "Lyrics offset (s, + = earlier)", "offset", -10, 10, 0.1)
 
         p = self._tab(tabs, "Behavior")
@@ -247,6 +249,9 @@ class SettingsWindow:
         if self.s["learn_word_timing"] is None:
             import word_learner
             self.s["learn_word_timing"] = word_learner.have_model()
+        if self.s["fix_timing_by_listening"] is None:
+            import word_learner
+            self.s["fix_timing_by_listening"] = word_learner.have_model()
         self.s["x"], self.s["y"] = x, y   # keep where the user put it
         for refresh in self.refreshers:
             refresh()

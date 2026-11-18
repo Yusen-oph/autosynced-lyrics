@@ -30,6 +30,18 @@ class Lyrics:
         self.online = False          # found online (so it may be cached), not one of yours
         self.ai_lines: set[int] = set()   # translations written by Claude (see ai_translate)
         self.ai_checked = False
+        # Fixing lyrics timed for another version of the song, by listening (see retime()):
+        self.heard_starts: dict[int, float] = {}   # line index -> when it was actually sung
+        self.heard_lines: set[int] = set()         # lines whose word timing came from listening
+        self.orig_times: list[float] | None = None # the file's own times, before any fix
+        self.orig_chars = None
+        self.retimed = False                       # lines have been moved to match the song
+        self.retime_done = False                   # no need to measure again (e.g. from cache)
+
+    def set_times(self, times: list[float]) -> None:
+        self.lines = [(t, w) for t, (_, w) in zip(times, self.lines)]
+        self._times = list(times)
+        self._shown_key = None
 
     def index_at(self, seconds: float) -> int:
         """Index of the line that should be showing at `seconds` (-1 = before first line)."""
@@ -559,6 +571,77 @@ EXTRAS_VERSION = 3   # bump when translations / word timing are worked out diffe
                      # cached ones from before are then looked up again (lyrics are kept)
 
 
+# ---- fixing lyrics timed for another version of the song ---------------------------
+RETIME_LEAD = 0.15        # show a line this much before its first word is heard
+RETIME_MIN_SHIFT = 0.3    # lines already this close are left alone
+RETIME_MIN_POINTS = 3     # lines that must be measured before anything moves
+RETIME_MAX_SHIFT = 15.0
+
+
+def retime_offsets(times: list[float], heard: dict[int, float]) -> list[float] | None:
+    """How far to move each line, from the lines whose real start was heard.
+
+    Each measured line says "this part of the song is off by d seconds". Odd ones out
+    (a repeated chorus line matched to the wrong repeat, a misheard word) are dropped by
+    comparing with their neighbours, the rest are smoothed, and lines in between get a
+    shift interpolated by time, so both a constant delay and a version with a longer
+    or shorter section in the middle come out right. None if nothing needs moving."""
+    pts = sorted((i, heard[i] - RETIME_LEAD - times[i]) for i in heard if 0 <= i < len(times))
+    pts = [(i, d) for i, d in pts if abs(d) <= RETIME_MAX_SHIFT]
+    if len(pts) < RETIME_MIN_POINTS:
+        return None
+    med = lambda xs: sorted(xs)[len(xs) // 2] if len(xs) % 2 else sum(sorted(xs)[len(xs) // 2 - 1:len(xs) // 2 + 1]) / 2
+    keep = []
+    for j, (i, d) in enumerate(pts):
+        near = [pts[k][1] for k in range(max(0, j - 3), min(len(pts), j + 4))]
+        if abs(d - med(near)) <= 0.8:
+            keep.append((i, d))
+    if len(keep) < RETIME_MIN_POINTS:
+        return None
+    smooth = [(i, med([keep[k][1] for k in range(max(0, j - 2), min(len(keep), j + 3))]))
+              for j, (i, _) in enumerate(keep)]
+    if max(abs(d) for _, d in smooth) < RETIME_MIN_SHIFT:
+        return None
+    out = []
+    for n, t in enumerate(times):
+        left = next(((i, d) for i, d in reversed(smooth) if i <= n), None)
+        right = next(((i, d) for i, d in smooth if i >= n), None)
+        if left is None:
+            off = right[1]
+        elif right is None or right[0] == left[0]:
+            off = left[1]
+        else:
+            tl, tr = times[left[0]], times[right[0]]
+            f = (t - tl) / (tr - tl) if tr > tl else 0.5
+            off = left[1] + (right[1] - left[1]) * min(1.0, max(0.0, f))
+        out.append(off)
+    return out
+
+
+def apply_retime(lyr: Lyrics) -> bool:
+    """Move lyr's lines (and word timing that came with the file) to match when they
+    were heard. True if anything changed."""
+    if lyr.orig_times is None:
+        lyr.orig_times = [t for t, _ in lyr.lines]
+        lyr.orig_chars = [list(c) if c else None for c in lyr.char_times]
+    offs = retime_offsets(lyr.orig_times, lyr.heard_starts)
+    if offs is None:
+        return False
+    new, last = [], 0.0
+    for t, off in zip(lyr.orig_times, offs):
+        last = max(last, t + off, 0.0)
+        new.append(round(last, 3))
+    old = [t for t, _ in lyr.lines]
+    if all(abs(a - b) < 0.05 for a, b in zip(new, old)):
+        return False
+    for i, (chars, off) in enumerate(zip(lyr.orig_chars, offs)):
+        if chars and i not in lyr.heard_lines:     # timing from the file moves with its line
+            lyr.char_times[i] = [(c[0] + off, c[1] + off) if c else None for c in chars]
+    lyr.set_times(new)
+    lyr.retimed = True
+    return True
+
+
 def _to_cache(lyr: Lyrics | None) -> dict | None:
     if lyr is None:
         return None
@@ -567,7 +650,8 @@ def _to_cache(lyr: Lyrics | None) -> dict | None:
             # AI translations live in ai_translate's own store, not here (kept apart from human ones)
             "tr": [None if i in lyr.ai_lines else t for i, t in enumerate(lyr.translations)],
             "extras": lyr.extras_loaded, "extras_at": time.time(),
-            "ct": [[r(c) for c in ct] if ct else None for ct in lyr.char_times]}
+            "ct": [[r(c) for c in ct] if ct else None for ct in lyr.char_times],
+            "rt": len(lyr.heard_starts) if lyr.retimed else 0}   # lines already fixed by listening
 
 
 def _from_cache(d: dict) -> Lyrics | None:
@@ -579,5 +663,6 @@ def _from_cache(d: dict) -> Lyrics | None:
         lyr.translations = list(d["tr"])
         lyr.char_times = [[tuple(c) if c else None for c in ct] if ct else None for ct in d["ct"]]
         lyr.extras_loaded = bool(d.get("extras"))
+    lyr.retime_done = (d.get("rt") or 0) >= 6     # enough lines were checked last time
     lyr.online = True
     return lyr

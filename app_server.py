@@ -286,6 +286,9 @@ class AppServer:
             if s["learn_word_timing"] is None:
                 import word_learner
                 s["learn_word_timing"] = word_learner.have_model()
+            if s["fix_timing_by_listening"] is None:
+                import word_learner
+                s["fix_timing_by_listening"] = word_learner.have_model()
             self.app.settings_changed()
         self._run_on_app(apply)
 

@@ -50,6 +50,7 @@ DEFAULTS = {
     "animation": "slide",
     "animation_ms": 350,
     "bouncing_note": False,        # a note hopping along the words as they're sung
+    "fix_timing_by_listening": None,   # move badly timed online lyrics to match the song (None = decide on first run)
     "learn_word_timing": None,     # learn word timing by listening (None = decide on first run)
     "note_offset": 0.0,            # s; + = the note hops earlier (e.g. for Bluetooth delay)
     # layout / timing / behaviour
