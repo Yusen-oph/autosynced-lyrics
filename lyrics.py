@@ -37,10 +37,6 @@ class Lyrics:
         self.orig_chars = None
         self.retimed = False                       # lines have been moved to match the song
         self.retime_done = False                   # no need to measure again (e.g. from cache)
-        # Picking the right version (feat. / remix / clean...) by listening (see pick_version):
-        self.alts: list["Lyrics"] = []             # other versions online, with different words
-        self.heard_chunks: list[list[tuple[str, float]]] = []   # words heard so far, per stretch
-        self.version_checked = False               # settled: don't listen for this again
 
     def set_times(self, times: list[float]) -> None:
         self.lines = [(t, w) for t, (_, w) in zip(times, self.lines)]
@@ -357,60 +353,7 @@ def _query(title: str, artist: str, album: str, duration: float) -> dict | None:
     return None
 
 
-_SEARCH_MEMO: dict = {}     # (title, artist) -> (time, results): the lookup and the version
-SEARCH_MEMO_S = 300         # check right after it ask LRCLIB the same thing once, not twice
-
-
-# ---- who sings on it (feat. / with / &) -----------------------------------------------
-_FEAT = re.compile(r"[(\[]\s*(?:feat\.?|ft\.?|featuring|with)\s+([^)\]]+)[)\]]"
-                   r"|\s-\s*(?:feat\.?|ft\.?|featuring)\s+(.+)$"
-                   r"|\s(?:feat\.?|ft\.?|featuring)\s+(.+)$", re.I)
-_SPLIT = re.compile(r"\s*(?:,|&|＆|、|/|and|x|feat\.?|ft\.?|with)\s*", re.I)
-
-
-def _name(s: str) -> str:
-    return re.sub(r"[\W_]+", "", s.casefold())
-
-
-def singers(title: str, artist: str) -> tuple[str, set[str]]:
-    """(main singer, everyone else credited) from a title like "Song (feat. A & B)" and an
-    artist field like "Main, A & B". Names are squashed (lower case, no spaces) for matching."""
-    names = [n for n in _SPLIT.split(artist or "") if n.strip()]
-    main = _name(names[0]) if names else ""
-    others = {_name(n) for n in names[1:]}
-    for m in _FEAT.finditer(title or ""):
-        part = next(g for g in m.groups() if g)
-        others |= {_name(n) for n in _SPLIT.split(part) if n.strip()}
-    others.discard("")
-    others.discard(main)
-    return main, others
-
-
-def _names_off(want: set[str], x: dict, main: str) -> int:
-    """How many singers differ between the song playing and a lyrics entry: featured
-    singers it doesn't mention, plus ones it credits that aren't on this song."""
-    text = _name(f"{x.get('trackName', '')} {x.get('artistName', '')}")
-    missing = sum(1 for n in want if n not in text)
-    _, theirs = singers(x.get("trackName", ""), x.get("artistName", ""))
-    extra = sum(1 for n in theirs if n != main and not any(n in w or w in n for w in want))
-    return missing + extra
-
-
-NAME_WEIGHT = 4.0   # one singer more/less counts like being 4 s off in length
-
-
 def _search(title: str, artist: str) -> list:
-    memo = _SEARCH_MEMO.get((title, artist))
-    if memo and time.time() - memo[0] < SEARCH_MEMO_S:
-        return memo[1]
-    out = _search_now(title, artist)
-    _SEARCH_MEMO[(title, artist)] = (time.time(), out)
-    if len(_SEARCH_MEMO) > 50:
-        _SEARCH_MEMO.pop(next(iter(_SEARCH_MEMO)))
-    return out
-
-
-def _search_now(title: str, artist: str) -> list:
     """LRCLIB search by title and singer together: once with them as separate fields, and
     once as one "title singer" text search (finds entries whose names are written a bit
     differently, e.g. "A & B" vs "A, B"). Results merged, each version once.
@@ -419,11 +362,6 @@ def _search_now(title: str, artist: str) -> list:
     queries = [{"track_name": clean, "artist_name": artist}]
     if artist:
         queries.append({"q": f"{clean} {artist}"})
-    main, others = singers(title, artist)
-    guests = [n for n in _SPLIT.split(next((next(g for g in m.groups() if g) for m in _FEAT.finditer(title)), ""))
-              if n.strip()]
-    if guests:                      # versions filed under the featured singer's name
-        queries.append({"q": f"{clean} {guests[0].strip()}"})
     jobs = [sources.pool.submit(sources.http.get, f"{API}/search", params=q, headers=HEADERS, timeout=10)
             for q in queries]
     out, seen, errors = [], set(), []
@@ -444,91 +382,38 @@ def _search_now(title: str, artist: str) -> list:
     return out
 
 
-def words_key(lines) -> str:
-    """Fingerprint of a version's words (not its timing): same words = same version."""
-    import hashlib
-    text = " ".join(re.sub(r"[^\w]+", " ", w.casefold()).strip() for _, w in lines if w.strip())
-    return hashlib.md5(text.encode("utf-8")).hexdigest()
-
-
-ALT_LIMIT = 4
-
-
-def alternatives(title: str, artist: str, duration: float, current: "Lyrics") -> list["Lyrics"]:
-    """Other synced versions of this song online whose *words* differ from `current`
-    (e.g. with / without a featured verse, clean / explicit), same singer and similar
-    length. The app listens to find out which one is actually playing."""
-    seen = {words_key(current.lines)}
-    out = []
-    for x in _rank(_search(title, artist), title, artist, duration):
-        if not x.get("syncedLyrics"):
-            continue
-        lyr = _from_record(x)
-        if not lyr or len(lyr.lines) < 4:
-            continue
-        key = words_key(lyr.lines)
-        if key in seen:
-            continue
-        seen.add(key)
-        lyr.online = True
-        out.append(lyr)
-        if len(out) >= ALT_LIMIT:
-            break
-    return out
-
-
 def _rank(results: list, title: str, artist: str, duration: float) -> list:
     """LRCLIB search results, best first: synced, then the closest length. Results by
     someone else (a different song with the same name) and ones more than 15 s off the
     track's length are dropped."""
-    main, want = singers(title, artist)
-
     def fits(x):
         if sources._similar(x.get("trackName", ""), title) < 0.6:
             return False
         if sources._similar(x.get("artistName", ""), artist) < 0.6:
-            # filed under a featured singer instead of the main one is fine
-            theirs = _name(x.get("artistName", ""))
-            if not any(n and n in theirs for n in want | {main}):
-                return False
+            return False
         return not duration or abs((x.get("duration") or 0) - duration) <= 15
-
-    def cost(x):   # seconds off in length, plus a few seconds per singer that differs
-        off = abs((x.get("duration") or 0) - duration) if duration else 0
-        return off + NAME_WEIGHT * _names_off(want, x, main)
     keep = [x for x in results if (x.get("syncedLyrics") or x.get("plainLyrics")) and fits(x)]
-    keep.sort(key=lambda x: (not x.get("syncedLyrics"), cost(x)))
+    keep.sort(key=lambda x: (not x.get("syncedLyrics"),
+                             abs((x.get("duration") or 0) - duration) if duration else 0))
     return keep
 
 
-CLOSE_ENOUGH = 2.0   # versions within this much "cost" (s off + singer differences) count as equal
-
-
-def _most_complete(cands: list, want: set, main: str, duration: float) -> dict:
-    """The best synced version: closest in length with the right singers credited; among
-    versions that fit about equally well, the one with the most sung lines. Copies often
-    leave out a featured verse, so the fullest one is usually the version that's playing."""
-    def cost(x):
-        off = abs((x.get("duration") or 0) - duration) if duration else 0
-        return off + NAME_WEIGHT * _names_off(want, x, main)
-    def sung(x):
-        return sum(1 for _, w in parse_lrc(x.get("syncedLyrics") or "") if w.strip())
-    cands = [x for x in cands if x and x.get("syncedLyrics")]
-    best = min(cost(x) for x in cands)
-    near = [x for x in cands if cost(x) <= best + CLOSE_ENOUGH]
-    return max(near, key=lambda x: (sung(x), -cost(x)))
-
-
 def _closer_version(exact: dict, title: str, artist: str, duration: float) -> dict:
-    """LRCLIB often has several synced versions of a song, and its exact match isn't always
-    the right one. Pick from all of them by length, credited singers and completeness."""
-    main, want = singers(title, artist)
+    """LRCLIB often has several synced versions of a song. If the one it picked is more
+    than a second longer/shorter than the track playing (probably another edit, so every
+    line would be shifted), use a synced version whose length matches better."""
+    off = abs((exact.get("duration") or 0) - duration) if duration else 0
+    if off <= 1.0:
+        return exact
     try:
         results = _search(title, artist)
     except (requests.RequestException, ValueError):
         return exact
-    ranked = [x for x in _rank(results, title, artist, duration) if x.get("syncedLyrics")]
-    return _most_complete([exact] + ranked, want, main, duration)
+    better = [x for x in results if x.get("syncedLyrics")
+              and sources._similar(x.get("trackName", ""), title) >= 0.8
+              and sources._similar(x.get("artistName", ""), artist) >= 0.6
+              and abs((x.get("duration") or 0) - duration) < off - 0.5]
+    return min(better, key=lambda x: abs(x["duration"] - duration)) if better else exact
 
 
 def _lrclib(title: str, artist: str, album: str, duration: float) -> dict | None:
@@ -551,9 +436,6 @@ def _lrclib(title: str, artist: str, album: str, duration: float) -> dict | None
         raise
     results = _rank(results, title, artist, duration)
     best = results[0] if results else None
-    if best and best.get("syncedLyrics"):
-        main, want = singers(title, artist)
-        best = _most_complete(results, want, main, duration)
     if best and (best.get("syncedLyrics") or exact is None):
         return best
     return exact
@@ -650,11 +532,7 @@ def search_online(title: str, artist: str, duration: float = 0, album: str = "")
         if exact and exact.get("syncedLyrics"):
             return {**_closer_version(exact, title, artist, duration), "source": "LRCLIB"}
     results = _rank(_search(title, artist), title, artist, duration)
-    best = results[0] if results else None
-    if best and best.get("syncedLyrics"):
-        main, want = singers(title, artist)
-        best = _most_complete(results, want, main, duration)
-    best = {**best, "source": "LRCLIB"} if best else None
+    best = {**results[0], "source": "LRCLIB"} if results else None
     if best and best.get("syncedLyrics"):
         return best
     # No synced lyrics on LRCLIB: try the other synced source, then untimed fallbacks.
@@ -687,9 +565,8 @@ def fetch_local(title: str, artist: str, duration: float = 0, use_cache: bool = 
         return True, from_text(mine)
     if use_cache:
         hit, d = cache.get(title, artist, duration)
-        if hit and (d.get("lv") == LOOKUP_VERSION or d.get("vc")):
+        if hit:
             return True, _from_cache(d)
-        # else: found with an older way of picking versions: look it up again
     return False, None
 
 
@@ -784,21 +661,16 @@ def apply_retime(lyr: Lyrics) -> bool:
     return True
 
 
-LOOKUP_VERSION = 3   # bump when versions are picked differently: older cached picks are redone
-
-
 def _to_cache(lyr: Lyrics | None) -> dict | None:
     if lyr is None:
-        return {"lines": None, "lv": LOOKUP_VERSION}     # remembered: nothing found online
+        return None
     r = lambda pair: [round(pair[0], 2), round(pair[1], 2)] if pair else None
     return {"v": EXTRAS_VERSION, "lines": [[round(t, 3), w] for t, w in lyr.lines], "synced": lyr.synced,
             # AI translations live in ai_translate's own store, not here (kept apart from human ones)
             "tr": [None if i in lyr.ai_lines else t for i, t in enumerate(lyr.translations)],
             "extras": lyr.extras_loaded, "extras_at": time.time(),
             "ct": [[r(c) for c in ct] if ct else None for ct in lyr.char_times],
-            "rt": len(lyr.heard_starts) if lyr.retimed else 0,   # lines already fixed by listening
-            "vc": lyr.version_checked,                           # right version confirmed by listening
-            "lv": LOOKUP_VERSION}
+            "rt": len(lyr.heard_starts) if lyr.retimed else 0}   # lines already fixed by listening
 
 
 def _from_cache(d: dict) -> Lyrics | None:
@@ -811,6 +683,5 @@ def _from_cache(d: dict) -> Lyrics | None:
         lyr.char_times = [[tuple(c) if c else None for c in ct] if ct else None for ct in d["ct"]]
         lyr.extras_loaded = bool(d.get("extras"))
     lyr.retime_done = (d.get("rt") or 0) >= 6     # enough lines were checked last time
-    lyr.version_checked = bool(d.get("vc"))
     lyr.online = True
     return lyr

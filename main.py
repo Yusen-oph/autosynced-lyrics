@@ -346,41 +346,11 @@ class App:
         # Show the lyrics now; translations / word timing follow if they aren't in yet.
         self.lyrics, self.status = result, status
         self._note_line = None
-        if (result is not None and result.synced and result.online and not result.version_checked
-                and self.settings["fix_timing_by_listening"]):
-            threading.Thread(target=self._find_versions, args=(track, result), daemon=True).start()
         if result is None or not result.synced or not self._wants_extras():
             return
         if not result.extras_loaded:
             self._load_extras(track, result, extras)
         self._ai_fill(track, result)
-
-    def _find_versions(self, track, lyr):
-        """Other versions online with different words (feat. / remix / clean...): the
-        listener then checks which one is actually playing."""
-        try:
-            lyr.alts = lyrics_api.alternatives(track.title, track.artist, track.duration, lyr)
-        except Exception:
-            lyr.alts = []
-        if not lyr.alts:
-            lyr.version_checked = True          # only one version exists: nothing to compare
-
-    def _switch_version(self, track, old, new):
-        """The listener heard that another version is playing: show that one instead."""
-        new.online = True
-        new.version_checked = True
-        new.alts = []
-        self.lyrics = new
-        self._note_line = None
-        self._learn_key = None                  # timing / word learning start over on it
-        if self.settings["cache_lyrics"]:
-            lyrics_api.remember_extras(track.title, track.artist, track.duration, new)
-
-        def extras():
-            if self._wants_extras():
-                self._load_extras(track, new, None)
-                self._ai_fill(track, new)
-        threading.Thread(target=extras, daemon=True).start()
 
     def _load_extras(self, track, result, extras):
         extra = lyrics_api.Lyrics(result.lines, True)   # filled off to the side, swapped in at once
@@ -467,13 +437,13 @@ class App:
 
     RETIME_ENOUGH = 12      # lines measured before the timing fix is considered settled
 
-    def _set_learn_target(self, track, lyr, words_on, fix_on, version_on=False):
+    def _set_learn_target(self, track, lyr, words_on, fix_on):
         wanted = [i for i, (_, text) in enumerate(lyr.lines)
                   if words_on and lyrics_api._squash(text) and not lyrics_api.has_word_timing(lyr, i)]
         measure = [i for i, (_, text) in enumerate(lyr.lines)
                    if fix_on and i not in lyr.heard_starts
                    and len(word_learner.word_slots(text)) >= word_learner.MEASURE_MIN_WORDS]
-        self.learner.set_target(track.key, lyr.lines, wanted, measure, listen=version_on)
+        self.learner.set_target(track.key, lyr.lines, wanted, measure)
 
     def _learn(self, track):
         """Learn word timing by listening, for lines no site had it for (see word_learner)."""
@@ -485,33 +455,22 @@ class App:
             lyr.retime_done = True               # enough to know the timing: stop listening for it
         fix_on = bool(ready and self.settings["fix_timing_by_listening"] and lyr.online
                       and not lyr.retime_done)
-        version_on = bool(ready and self.settings["fix_timing_by_listening"] and lyr.online
-                          and lyr.alts and not lyr.version_checked)
-        self.learner.enabled = words_on or fix_on or version_on
-        if not (words_on or fix_on or version_on):
+        self.learner.enabled = words_on or fix_on
+        if not (words_on or fix_on):
             self._learn_key = None
             return
-        key = (track.key, id(lyr), words_on, fix_on, version_on)
+        key = (track.key, id(lyr), words_on, fix_on)
         if key != self._learn_key:               # new song / lyrics: tell it what's missing
             self._learn_key = key
-            self._set_learn_target(track, lyr, words_on, fix_on, version_on)
+            self._set_learn_target(track, lyr, words_on, fix_on)
         changed = moved = False
         while True:
             try:
-                song, found, starts, words = self.learner.results.get_nowait()
+                song, found, starts = self.learner.results.get_nowait()
             except queue.Empty:
                 break
             if song != track.key or self.lyrics is not lyr:
                 continue
-            if words and version_on:
-                lyr.heard_chunks.append(words)
-                better, settled = word_learner.pick_version(lyr, lyr.alts, lyr.heard_chunks)
-                if better is not None:
-                    self._switch_version(track, lyr, better)
-                    return
-                if settled:
-                    lyr.version_checked = True
-                    changed = True
             for i, chars in found.items():
                 if i < len(lyr.char_times) and not lyr.char_times[i]:
                     lyr.char_times[i] = chars
@@ -525,7 +484,7 @@ class App:
             # Your own earlier/later fix for this song was making up for the same delay.
             if song_offsets.get(track.title, track.artist):
                 song_offsets.nudge(track.title, track.artist, -song_offsets.get(track.title, track.artist))
-            self._set_learn_target(track, lyr, words_on, fix_on, version_on)   # it matches against the new times
+            self._set_learn_target(track, lyr, words_on, fix_on)   # it matches against the new times
             self._note_line = None
         if changed:
             self._note_line = None               # the note switches to the learned timing
