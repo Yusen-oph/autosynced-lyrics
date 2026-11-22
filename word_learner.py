@@ -145,16 +145,53 @@ def measure_starts(lines: list[tuple[float, str]], measure: set[int], heard, win
     return out
 
 
+# ---- which version is playing (feat. / remix / clean...) ------------------------------
+VERSION_MIN_HEARD = 30     # heard words before switching version at all
+VERSION_LEAD = 5           # a version must match at least this many more heard words...
+VERSION_LEAD_SHARE = 0.12  # ...and this share of all heard words, to replace the shown one
+VERSION_SETTLED = 160      # heard words after which, with no clear winner, it stops checking
+
+
+def version_score(lines: list[tuple[float, str]], chunks) -> int:
+    """How many heard words (in order, near the right time) this version's lyrics contain."""
+    total = 0
+    for heard in chunks:
+        if not heard:
+            continue
+        lo, hi = heard[0][1], heard[-1][1]
+        toks = [(tok, t) for t, line in lines if lo - MEASURE_REACH <= t <= hi + 5
+                for tok in autosync.tokens(line)]
+        if not toks:
+            continue
+        pairs = autosync._match([k for k, _ in toks], [k for k, _ in heard])
+        total += sum(1 for i, j in pairs.items() if abs(toks[i][1] - heard[j][1]) <= MEASURE_REACH)
+    return total
+
+
+def pick_version(current, alts, chunks):
+    """(better version or None, settled?). Switches only on a clear lead, so two versions
+    that share the part heard so far keep the one shown until the parts that differ play."""
+    heard = sum(len(c) for c in chunks)
+    if heard < VERSION_MIN_HEARD or not alts:
+        return None, False
+    cur = version_score(current.lines, chunks)
+    scores = [(version_score(a.lines, chunks), n) for n, a in enumerate(alts)]
+    best, n = max(scores)
+    if best >= cur + max(VERSION_LEAD, VERSION_LEAD_SHARE * heard):
+        return alts[n], True
+    return None, heard >= VERSION_SETTLED
+
+
 class WordLearner(threading.Thread):
     """Background listener. The app calls set_target(); results arrive on .results as
-    (song key, {line index: per-char timing}, {line index: heard start})."""
+    (song key, {line index: per-char timing}, {line index: heard start}, heard words)."""
 
     def __init__(self, watcher):
         super().__init__(daemon=True)
         self.watcher = watcher
         self.results: queue.Queue = queue.Queue()
         self.status = ""
-        self._target = None            # (song key, lines, wanted line indexes, lines to measure)
+        self._target = None            # (song key, lines, wanted, to measure, keep listening?)
         self._lock = threading.Lock()
         self._buf: list[np.ndarray] = []
         self._marks: list[tuple[int, float, tuple]] = []   # (samples so far, song pos, song key)
@@ -166,12 +203,13 @@ class WordLearner(threading.Thread):
         self.enabled = False
 
     # ---- called by the app ------------------------------------------------
-    def set_target(self, key, lines, wanted, measure=()):
-        """Song to learn: its lines [(t, text)], the indexes still lacking word timing, and
-        the lines whose real start should be measured (to fix badly timed lyrics)."""
+    def set_target(self, key, lines, wanted, measure=(), listen=False):
+        """Song to learn: its lines [(t, text)], the indexes still lacking word timing, the
+        lines whose real start should be measured (to fix badly timed lyrics), and whether
+        to report every heard word anyway (to tell which version of the song is playing)."""
         with self._lock:
-            self._target = ((key, list(lines), set(wanted), set(measure))
-                            if key and (wanted or measure) else None)
+            self._target = ((key, list(lines), set(wanted), set(measure), bool(listen))
+                            if key and (wanted or measure or listen) else None)
 
     # ---- capture ------------------------------------------------------------
     def _on_audio(self, data, channels):
@@ -270,7 +308,7 @@ class WordLearner(threading.Thread):
         return _resample_16k(clip, self._rate), pos_at, run[-1][1]
 
     def _maybe_learn(self, target):
-        key, lines, wanted, measure = target
+        key, lines, wanted, measure, listen = target
         done = self._done_until.get(key, -1.0)
         got = self._piece(key, max(done, 0.0))
         if got is None:
@@ -280,7 +318,7 @@ class WordLearner(threading.Thread):
         needs = [i for i in wanted if lo - 2 <= lines[i][0] <= hi]
         to_measure = [i for i in measure if lo - MEASURE_REACH <= lines[i][0] <= hi + MEASURE_REACH]
         self._done_until[key] = end_pos
-        if not (needs or to_measure) or float(np.abs(audio).max()) < 1e-4:
+        if not (needs or to_measure or listen) or float(np.abs(audio).max()) < 1e-4:
             return                               # instrumental here / already timed / silence
         self.status = "listening…"
         if self._model is None:
@@ -305,10 +343,11 @@ class WordLearner(threading.Thread):
             heard += [(w.word, pos_at(w.start), pos_at(w.end)) for w in (seg.words or [])]
         found = match_lines(lines, set(needs), heard, (lo, hi)) if needs else {}
         starts = measure_starts(lines, set(to_measure), heard, (lo, hi)) if to_measure else {}
-        if found or starts:
+        words = [(tok, s + BIAS) for w, s, _ in heard for tok in autosync.tokens(w)] if listen else []
+        if found or starts or words:
             with self._lock:
                 if self._target and self._target[0] == key:
                     self._target[2].difference_update(found)
                     self._target[3].difference_update(starts)
-            self.results.put((key, found, starts))
+            self.results.put((key, found, starts, words))
         self.status = f"learned {len(found)} line(s), measured {len(starts)}"

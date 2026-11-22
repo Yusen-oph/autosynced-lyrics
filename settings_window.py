@@ -73,8 +73,8 @@ class SettingsWindow:
                        "(uses some CPU while a new song plays; needs a speech model)",
                     "learn_word_timing")
         self._section(p, "Timing")
-        self._check(p, "Fix badly timed lyrics by listening\n"
-                       "(lyrics found online for another version of the song)", "fix_timing_by_listening")
+        self._check(p, "Fix lyrics by listening: the right version of the song\n"
+                       "(feat., remix, clean…) and the right timing", "fix_timing_by_listening")
         self._spin(p, "Lyrics offset (s, + = earlier)", "offset", -10, 10, 0.1)
 
         p = self._tab(tabs, "Behavior")

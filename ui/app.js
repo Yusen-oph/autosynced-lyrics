@@ -492,7 +492,7 @@ const SECTIONS = [
     { type: "range", key: "animation_ms", label: "Effect duration", min: 100, max: 1200, step: 50, unit: " ms" },
     { type: "toggle", key: "bouncing_note", label: "Bouncing note", hint: "A note hops along the words as they're sung" },
     { type: "number", key: "note_offset", label: "Note timing", hint: "Seconds; + = earlier (try −0.15 with Bluetooth headphones)", min: -.5, max: .5, step: .02 },
-    { type: "toggle", key: "fix_timing_by_listening", label: "Fix badly timed lyrics by listening", hint: "Lyrics found online can be timed for another version of the song. While it plays, lines are moved to when they're actually sung (remembered after the first play)." },
+    { type: "toggle", key: "fix_timing_by_listening", label: "Fix lyrics by listening", hint: "While a song plays, picks the version whose words are actually sung (feat., remix, clean…) and moves lines to when they're sung. Remembered after the first play." },
     { type: "toggle", key: "learn_word_timing", label: "Learn word timing by listening", hint: "When no lyrics site has it. Uses some CPU while a new song plays." },
     { type: "number", key: "offset", label: "Lyrics offset for all songs", hint: "Seconds; + = earlier", min: -10, max: 10, step: .1 },
   ]},
