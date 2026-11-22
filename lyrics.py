@@ -1,6 +1,7 @@
 """Finds time-synced lyrics (LRCLIB first, then other sources) and parses LRC."""
 import re
 import time
+import unicodedata
 from bisect import bisect_right
 from pathlib import Path
 
@@ -398,10 +399,74 @@ def _rank(results: list, title: str, artist: str, duration: float) -> list:
     return keep
 
 
+def _full_title(s: str) -> str:
+    """Title for an exact comparison, feat. part included: "ft." / "featuring" / "(with"
+    count as "feat", a leading "Artist - " and case / spaces / punctuation are ignored."""
+    s = unicodedata.normalize("NFKC", s or "").casefold()
+    s = re.sub(r"\b(ft\.?|featuring)\s", "feat ", s)
+    s = re.sub(r"[(\[]\s*with\s", "(feat ", s)
+    s = re.sub(r"\s*[(\[][^)\]]*(official|video|audio|lyrics?)[^)\]]*[)\]]", "", s)
+    return re.sub(r"[\W_]+", "", s)
+
+
+EXACT_LENGTH = 1.0   # s: "the same length as the song playing"
+
+
+def _first_exact(title: str, artist: str, duration: float, extra: list = ()) -> dict | None:
+    """Among synced versions with exactly this title (feat. part included), by this singer and
+    the same length as the track: the number of lines most of them share, then the first
+    one ever uploaded. Later uploads are mostly copies, often missing a featured verse."""
+    if not duration:
+        return None
+    found = list(extra)
+    try:
+        found += _search(title, artist)
+    except (requests.RequestException, ValueError):
+        pass
+    if _NOISE.sub("", title).strip() != title.strip():     # "Song (feat. X)": also search that whole title
+        for q in ({"track_name": title, "artist_name": artist}, {"q": f"{title} {artist}"}):
+            try:
+                r = sources.http.get(f"{API}/search", params=q, headers=HEADERS, timeout=10)
+                found += r.json() if r.ok else []
+            except (requests.RequestException, ValueError):
+                pass
+    want = _full_title(title)
+    main = _norm_artist(artist)
+    cands, seen = [], set()
+    for x in found:
+        if not x or not x.get("syncedLyrics") or x.get("id") in seen:
+            continue
+        seen.add(x.get("id"))
+        if _full_title(x.get("trackName", "")) != want:
+            continue                       # exactly this title, feat. part and all
+        if main and main not in _norm_artist(x.get("artistName", "")):
+            continue
+        if abs((x.get("duration") or 0) - duration) > EXACT_LENGTH:
+            continue
+        cands.append(x)
+    if not cands:
+        return None
+    sung = lambda x: sum(1 for _, w in parse_lrc(x["syncedLyrics"]) if w.strip())
+    groups: dict[int, list] = {}
+    for x in cands:
+        groups.setdefault(sung(x), []).append(x)
+    first = lambda xs: min(xs, key=lambda x: x.get("id") or 0)
+    best = max(groups.values(), key=lambda xs: (len(xs), -(first(xs).get("id") or 0)))
+    return first(best)
+
+
+def _norm_artist(s: str) -> str:
+    names = re.split(r"\s*(?:,|&|\bfeat\.?|\bft\.?|\bwith\b|\band\b)\s*", s or "", flags=re.I)
+    return re.sub(r"[\W_]+", "", unicodedata.normalize("NFKC", names[0] if names else "").casefold())
+
+
 def _closer_version(exact: dict, title: str, artist: str, duration: float) -> dict:
     """LRCLIB often has several synced versions of a song. If the one it picked is more
     than a second longer/shorter than the track playing (probably another edit, so every
     line would be shifted), use a synced version whose length matches better."""
+    first = _first_exact(title, artist, duration, [exact])
+    if first:
+        return first
     off = abs((exact.get("duration") or 0) - duration) if duration else 0
     if off <= 1.0:
         return exact
@@ -427,7 +492,10 @@ def _lrclib(title: str, artist: str, album: str, duration: float) -> dict | None
         exact = None
 
     # No synced lyrics from the exact match (none at all, or only untimed ones):
-    # fuzzy search, prefer synced results with the closest duration.
+    # the first version of exactly this song and length, else fuzzy search.
+    first = _first_exact(title, artist, duration)
+    if first:
+        return first
     try:
         results = _search(title, artist)
     except (requests.RequestException, ValueError):
@@ -565,8 +633,9 @@ def fetch_local(title: str, artist: str, duration: float = 0, use_cache: bool = 
         return True, from_text(mine)
     if use_cache:
         hit, d = cache.get(title, artist, duration)
-        if hit:
+        if hit and d.get("lv") == LOOKUP_VERSION:
             return True, _from_cache(d)
+        # else: picked the old way (before the first-exact-version rule): look it up again
     return False, None
 
 
@@ -661,16 +730,20 @@ def apply_retime(lyr: Lyrics) -> bool:
     return True
 
 
+LOOKUP_VERSION = 2   # bump when versions are picked differently: older cached picks are redone
+
+
 def _to_cache(lyr: Lyrics | None) -> dict | None:
     if lyr is None:
-        return None
+        return {"lines": None, "lv": LOOKUP_VERSION}     # remembered: nothing found online
     r = lambda pair: [round(pair[0], 2), round(pair[1], 2)] if pair else None
     return {"v": EXTRAS_VERSION, "lines": [[round(t, 3), w] for t, w in lyr.lines], "synced": lyr.synced,
             # AI translations live in ai_translate's own store, not here (kept apart from human ones)
             "tr": [None if i in lyr.ai_lines else t for i, t in enumerate(lyr.translations)],
             "extras": lyr.extras_loaded, "extras_at": time.time(),
             "ct": [[r(c) for c in ct] if ct else None for ct in lyr.char_times],
-            "rt": len(lyr.heard_starts) if lyr.retimed else 0}   # lines already fixed by listening
+            "rt": len(lyr.heard_starts) if lyr.retimed else 0,
+            "lv": LOOKUP_VERSION}   # lines already fixed by listening
 
 
 def _from_cache(d: dict) -> Lyrics | None:
