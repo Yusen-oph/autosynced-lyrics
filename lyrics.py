@@ -501,27 +501,34 @@ def _rank(results: list, title: str, artist: str, duration: float) -> list:
     return keep
 
 
+CLOSE_ENOUGH = 2.0   # versions within this much "cost" (s off + singer differences) count as equal
+
+
+def _most_complete(cands: list, want: set, main: str, duration: float) -> dict:
+    """The best synced version: closest in length with the right singers credited; among
+    versions that fit about equally well, the one with the most sung lines. Copies often
+    leave out a featured verse, so the fullest one is usually the version that's playing."""
+    def cost(x):
+        off = abs((x.get("duration") or 0) - duration) if duration else 0
+        return off + NAME_WEIGHT * _names_off(want, x, main)
+    def sung(x):
+        return sum(1 for _, w in parse_lrc(x.get("syncedLyrics") or "") if w.strip())
+    cands = [x for x in cands if x and x.get("syncedLyrics")]
+    best = min(cost(x) for x in cands)
+    near = [x for x in cands if cost(x) <= best + CLOSE_ENOUGH]
+    return max(near, key=lambda x: (sung(x), -cost(x)))
+
+
 def _closer_version(exact: dict, title: str, artist: str, duration: float) -> dict:
-    """LRCLIB often has several synced versions of a song. If the one it picked is more
-    than a second longer/shorter than the track playing (probably another edit, so every
-    line would be shifted), use a synced version whose length matches better."""
-    off = abs((exact.get("duration") or 0) - duration) if duration else 0
+    """LRCLIB often has several synced versions of a song, and its exact match isn't always
+    the right one. Pick from all of them by length, credited singers and completeness."""
     main, want = singers(title, artist)
-    names = _names_off(want, exact, main)
-    if off <= 1.0 and not names:
-        return exact
     try:
         results = _search(title, artist)
     except (requests.RequestException, ValueError):
         return exact
-    # Same rules as the search: a better length, or the right singers credited, wins.
-    mine = off + NAME_WEIGHT * names
     ranked = [x for x in _rank(results, title, artist, duration) if x.get("syncedLyrics")]
-    if not ranked:
-        return exact
-    best = ranked[0]
-    best_cost = abs((best.get("duration") or 0) - duration) + NAME_WEIGHT * _names_off(want, best, main)
-    return best if best_cost < mine - 0.5 else exact
+    return _most_complete([exact] + ranked, want, main, duration)
 
 
 def _lrclib(title: str, artist: str, album: str, duration: float) -> dict | None:
@@ -544,6 +551,9 @@ def _lrclib(title: str, artist: str, album: str, duration: float) -> dict | None
         raise
     results = _rank(results, title, artist, duration)
     best = results[0] if results else None
+    if best and best.get("syncedLyrics"):
+        main, want = singers(title, artist)
+        best = _most_complete(results, want, main, duration)
     if best and (best.get("syncedLyrics") or exact is None):
         return best
     return exact
@@ -640,7 +650,11 @@ def search_online(title: str, artist: str, duration: float = 0, album: str = "")
         if exact and exact.get("syncedLyrics"):
             return {**_closer_version(exact, title, artist, duration), "source": "LRCLIB"}
     results = _rank(_search(title, artist), title, artist, duration)
-    best = {**results[0], "source": "LRCLIB"} if results else None
+    best = results[0] if results else None
+    if best and best.get("syncedLyrics"):
+        main, want = singers(title, artist)
+        best = _most_complete(results, want, main, duration)
+    best = {**best, "source": "LRCLIB"} if best else None
     if best and best.get("syncedLyrics"):
         return best
     # No synced lyrics on LRCLIB: try the other synced source, then untimed fallbacks.
@@ -770,7 +784,7 @@ def apply_retime(lyr: Lyrics) -> bool:
     return True
 
 
-LOOKUP_VERSION = 2   # bump when versions are picked differently: older cached picks are redone
+LOOKUP_VERSION = 3   # bump when versions are picked differently: older cached picks are redone
 
 
 def _to_cache(lyr: Lyrics | None) -> dict | None:
