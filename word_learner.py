@@ -198,9 +198,8 @@ class WordLearner(threading.Thread):
             with self._lock:
                 target = self._target if self.enabled else None
             if target is None and self._model is not None and time.monotonic() - idle_since > UNLOAD_AFTER:
-                self._model = None               # give the memory back until the next song needs it
-                import gc
-                gc.collect()
+                self._model.close()              # the helper process exits: all its memory goes back
+                self._model = None
             if target is not None:
                 idle_since = time.monotonic()
             if target is None:
@@ -284,25 +283,21 @@ class WordLearner(threading.Thread):
             return                               # instrumental here / already timed / silence
         self.status = "listening…"
         if self._model is None:
-            from faster_whisper import WhisperModel
-            autosync.MODELS_DIR.mkdir(parents=True, exist_ok=True)
-            # One thread, greedy decoding: about 8% of a 12-thread CPU for ~10 s per 20 s of
-            # song (measured), still keeping up with the music. More threads only made it
-            # finish sooner, at several times the CPU.
-            self._model = WhisperModel(model_name(), device="cpu", compute_type="int8",
-                                       cpu_threads=1, download_root=str(autosync.MODELS_DIR))
+            import whisper_proc
+            # In a helper process (memory fully returned when it exits). One thread, greedy
+            # decoding: about 8% of a 12-thread CPU for ~10 s per 20 s of song (measured),
+            # still keeping up with the music. Unsure passes are re-decoded at most once
+            # (Whisper's default retries up to 5 times: on loud music that alone could
+            # double or triple the CPU time).
+            self._model = whisper_proc.Whisper(model_name(), threads=1, beam=1, temperature=(0.0, 0.5))
         audio = (audio / max(1e-6, float(np.abs(audio).max())) * 0.9).astype(np.float32)
-        segments, _ = self._model.transcribe(audio, word_timestamps=True,
-                                             condition_on_previous_text=False, beam_size=1,
-                                             # Unsure passes are re-decoded at most once (Whisper's
-                                             # default retries up to 5 times: on loud music that
-                                             # alone could double or triple the CPU time).
-                                             temperature=(0.0, 0.5))
         heard = []
-        for seg in segments:
-            if seg.no_speech_prob > 0.6 and seg.avg_logprob < -0.8:
+        for seg in self._model.segments(audio):
+            if "duration" in seg:
                 continue
-            heard += [(w.word, pos_at(w.start), pos_at(w.end)) for w in (seg.words or [])]
+            if seg["no_speech_prob"] > 0.6 and seg["avg_logprob"] < -0.8:
+                continue
+            heard += [(w, pos_at(s), pos_at(e)) for w, s, e, _ in seg["words"]]
         found = match_lines(lines, set(needs), heard, (lo, hi)) if needs else {}
         starts = measure_starts(lines, set(to_measure), heard, (lo, hi)) if to_measure else {}
         if found or starts:

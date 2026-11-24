@@ -4,10 +4,15 @@ Runs in the system tray. The lyrics bar appears while one of those music apps is
 Launching it again (e.g. from the desktop shortcut) opens the app window (app_window.py),
 a separate process that talks to this one through app_server.py.
 """
+import sys
+
+if __name__ == "__main__" and "--whisper-worker" in sys.argv:   # the speech-model helper
+    import whisper_proc                                           # (see whisper_proc.py): start
+    sys.exit(whisper_proc.serve())                                # it before loading the app
+
 import ctypes
 import queue
 import socket
-import sys
 import threading
 import time
 import tkinter as tk

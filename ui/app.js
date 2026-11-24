@@ -191,7 +191,7 @@ async function poll() {
     now = { open: false, waiting: "Can't reach Autosynced Lyrics. Is it still running?" };
     renderNow();
   }
-  setTimeout(poll, 400);
+  setTimeout(poll, calm() ? 1500 : 400);
 }
 
 // ---- "a new version is available" -----------------------------------------
@@ -352,13 +352,19 @@ function lineAt(t) {
   return ans;
 }
 
+let tickPending = false, shownPct = -1, shownTime = "";
 function tick(force) {
   const p = position();
   const dur = now.open ? now.duration : 0;
   const frac = dur ? Math.min(1, p / dur) : 0;
-  $("#progressFill").style.width = (frac * 100) + "%";
-  $("#progressKnob").style.left = (frac * 100) + "%";
-  $("#tNow").textContent = fmtTime(p);
+  const pct = Math.round(frac * 1000) / 10;          // only redraw when it visibly moves
+  if (pct !== shownPct) {
+    shownPct = pct;
+    $("#progressFill").style.width = pct + "%";
+    $("#progressKnob").style.left = pct + "%";
+  }
+  const tt = fmtTime(p);
+  if (tt !== shownTime) { shownTime = tt; $("#tNow").textContent = tt; }
   if (lyr.synced && lyr.lines.length) {
     const i = lineAt(p + (now.fix || 0));
     if (i !== activeIdx || force) {
@@ -371,7 +377,12 @@ function tick(force) {
       scrollToNow(false);
     }
   }
-  if (!force) requestAnimationFrame(() => tick(false));
+  if (!force && !tickPending) {
+    tickPending = true;
+    const next = () => { tickPending = false; tick(false); };
+    // smooth (every frame) while you're looking; 4 times a second otherwise
+    if (calm()) setTimeout(next, 250); else requestAnimationFrame(next);
+  }
 }
 
 function scrollToNow(instant) {
@@ -455,6 +466,7 @@ const SECTIONS = [
     { type: "styles" },
     { type: "cover" },
     { type: "toggle", key: "bar_follows_style", label: "Lyrics bar uses the style's colours", hint: "Turn off to pick your own colours below" },
+    { type: "toggle", key: "low_cpu", label: "Low CPU mode", hint: "Plainer app window: no blurred backgrounds, reflections or spinning cover, fewer redraws. The window already goes quiet by itself when it isn't in front." },
   ]},
   { title: "Lyrics bar · look", items: [
     { type: "range", key: "opacity", label: "Overall opacity", min: .2, max: 1, step: .05, pct: true },
@@ -516,8 +528,27 @@ let S = null;
 async function loadSettings() {
   try { S = await api("settings"); } catch (e) { toast("Couldn't load settings"); return; }
   applyStyle(S.settings.ui_style);
+  setLowCpu(S.settings.low_cpu);
   renderSettings();
 }
+
+// ---- keeping CPU use down ----------------------------------------------------
+// "quiet": the window isn't in front (or is minimised), so nobody is watching closely:
+// pause animations and redraw a few times a second instead of 60. "low-cpu": the same
+// cuts all the time, plus no expensive blur / reflection effects (Settings).
+let lowCpu = false, quiet = !document.hasFocus();
+function setLowCpu(on) { lowCpu = !!on; document.body.classList.toggle("low-cpu", lowCpu); }
+function setQuiet(on) {
+  if (on === quiet) return;
+  quiet = on;
+  document.body.classList.toggle("quiet", quiet);
+  if (!quiet) tick(false);              // back to smooth updates straight away
+}
+const calm = () => lowCpu || quiet || document.hidden;
+window.addEventListener("blur", () => setQuiet(true));
+window.addEventListener("focus", () => setQuiet(false));
+document.addEventListener("visibilitychange", () => setQuiet(document.hidden || !document.hasFocus()));
+document.body.classList.toggle("quiet", quiet);
 
 function setPct(input) {
   const p = (input.value - input.min) / (input.max - input.min) * 100;
@@ -527,6 +558,7 @@ function setPct(input) {
 let saveTimer = null, pending = {};
 function save(key, value) {
   S.settings[key] = value;
+  if (key === "low_cpu") setLowCpu(value);
   pending[key] = value;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async () => {
@@ -834,7 +866,7 @@ $("#usageRefresh").onclick = loadUsage;
 // ---------------------------------------------------------------- start
 buildCover($("#record"));
 (async function start() {
-  try { S = await api("settings"); applyStyle(S.settings.ui_style); } catch (e) {}
+  try { S = await api("settings"); applyStyle(S.settings.ui_style); setLowCpu(S.settings.low_cpu); } catch (e) {}
   let page = "now";
   try { page = localStorage.getItem("page") || "now"; } catch (e) {}
   showPage(["now", "library", "editor", "settings", "usage"].includes(page) ? page : "now");

@@ -188,7 +188,6 @@ def play_audio(x: np.ndarray, sr: int = 16000) -> None:
 
 
 # ---- 2. transcription ------------------------------------------------------
-_model_cache = {}
 # Whisper would use every core by default (half the CPU or more on a 12-thread PC). A few
 # threads are plenty: the editor's auto-sync is a bit slower but the PC stays responsive.
 CPU_THREADS = max(2, min(4, (os.cpu_count() or 4) // 4))
@@ -196,41 +195,26 @@ CPU_THREADS = max(2, min(4, (os.cpu_count() or 4) // 4))
 
 def transcribe(audio: np.ndarray, model_size: str, progress=lambda f, msg: None):
     """Returns [(word, start_s, end_s, confidence 0-1, phrase number)] in recording time."""
-    from faster_whisper import WhisperModel
-
-    if model_size not in _model_cache:
-        progress(0.0, f"Loading the {model_size} model (downloads once, {MODEL_SIZES[model_size].split(',')[0]})…")
-        MODELS_DIR.mkdir(parents=True, exist_ok=True)
-        _model_cache[model_size] = WhisperModel(model_size, device="cpu", compute_type="int8",
-                                                cpu_threads=CPU_THREADS, download_root=str(MODELS_DIR))
-    model = _model_cache[model_size]
-    try:
-        return _transcribe(model, audio, progress)
-    finally:
-        release_models()                # the model takes 200-500 MB: don't keep it around
-
-
-def release_models() -> None:
-    _model_cache.clear()
-    import gc
-    gc.collect()
-
-
-def _transcribe(model, audio, progress):
-    """Run the model; returns the heard words (see transcribe)."""
-
+    import whisper_proc
+    progress(0.0, f"Loading the {model_size} model (downloads once, {MODEL_SIZES[model_size].split(',')[0]})…")
+    # In a helper process that exits afterwards: the 200-500 MB it needs all go back.
+    helper = whisper_proc.Whisper(model_size, threads=CPU_THREADS, beam=3,
+                                  temperature=(0.0, 0.4, 0.8))   # default retries up to 5 times
     # Loopback audio is often quiet; normalising helped recognition in testing.
     audio = (audio / max(1e-6, float(np.abs(audio).max())) * 0.9).astype(np.float32)
-    progress(0.0, "Listening to the recording…")
-    segments, info = model.transcribe(audio, word_timestamps=True, condition_on_previous_text=False,
-                                      vad_filter=False, beam_size=3,
-                                      temperature=(0.0, 0.4, 0.8))   # default retries up to 5 times
+    duration = max(1.0, len(audio) / 16000)
     words = []
-    for n, seg in enumerate(segments):
-        progress(min(0.99, seg.end / max(1.0, info.duration)), "Listening to the recording…")
-        if seg.no_speech_prob > 0.6 and seg.avg_logprob < -0.8:
-            continue  # Whisper "hearing" words in an instrumental part
-        words += [(w.word, w.start, w.end, w.probability, n) for w in (seg.words or [])]
+    try:
+        progress(0.0, "Listening to the recording…")
+        for n, seg in enumerate(helper.segments(audio)):
+            if "duration" in seg:
+                break
+            progress(min(0.99, seg["end"] / duration), "Listening to the recording…")
+            if seg["no_speech_prob"] > 0.6 and seg["avg_logprob"] < -0.8:
+                continue  # Whisper "hearing" words in an instrumental part
+            words += [(w, s, e, p, n) for w, s, e, p in seg["words"]]
+    finally:
+        helper.close()
     return words
 
 

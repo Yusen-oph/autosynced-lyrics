@@ -29,6 +29,7 @@ DEFAULTS = {
     "outline_enabled": True,
     "outline_color": "#000000",
     "outline_width": 2,
+    "low_cpu": False,              # app window: no blur / reflection / spinning, slower redraws
     "soft_background": True,       # gentle gradient + soft shadow under the background
     "album_colors": True,          # current line / background coloured from the album cover
     # text

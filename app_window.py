@@ -54,6 +54,35 @@ def _dress_window(style: str) -> None:
     user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0027)      # NOMOVE|NOSIZE|NOZORDER|FRAMECHANGED
 
 
+def _watch_front(window) -> None:
+    """Tell the page whether anyone is looking: the window in front and not minimised.
+    WebView2 keeps rendering at full speed behind other windows or minimised, so the page
+    can't tell by itself; when it's in the background the page pauses its animations and
+    redraws only a few times a second (see setQuiet in ui/app.js)."""
+    import threading
+    import time
+    if getattr(window, "_watching_front", False):
+        return                              # once per window, not per page load
+    window._watching_front = True
+    user32 = ctypes.windll.user32
+
+    def loop():
+        last = None
+        while True:
+            time.sleep(1.0)
+            hwnd = user32.FindWindowW(None, TITLE)
+            if not hwnd:
+                continue
+            quiet = bool(user32.IsIconic(hwnd)) or user32.GetForegroundWindow() != hwnd
+            if quiet != last:
+                try:
+                    window.evaluate_js(f"window.setQuiet && setQuiet({'true' if quiet else 'false'})")
+                    last = quiet
+                except Exception:
+                    pass
+    threading.Thread(target=loop, daemon=True).start()
+
+
 class _Api:
     """Called from the page (window.pywebview.api)."""
     def set_style(self, style):
@@ -78,6 +107,7 @@ def main(argv: list[str]) -> int:
                                    background_color=BACKGROUND.get(style, "#121212"),
                                    text_select=False, js_api=_Api())
     window.events.shown += lambda: (_dress_window(style), None)[1]
+    window.events.loaded += lambda: (_watch_front(window), None)[1]
     try:
         webview.start(gui="edgechromium", private_mode=True)
     except Exception:
