@@ -29,6 +29,18 @@ NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 # ---- the helper side ------------------------------------------------------------------
 def serve() -> int:
+    """The helper's main loop. Ends quietly when the app goes away (pipe closed), even in
+    the middle of a job: an error here would show a crash box in the packaged app."""
+    try:
+        code = _serve()
+    except (OSError, ValueError, EOFError):     # the app quit / restarted: nothing to tell it
+        code = 0
+    except Exception:
+        code = 1
+    os._exit(code)      # skip Python's final flush of a pipe nobody reads any more
+
+
+def _serve() -> int:
     import autosync
     from faster_whisper import WhisperModel
     models = {}
@@ -60,6 +72,8 @@ def serve() -> int:
                               "avg_logprob": s.avg_logprob,
                               "words": [[w.word, w.start, w.end, w.probability] for w in (s.words or [])]}})
             send({"done": info.duration})
+        except (OSError, BrokenPipeError):
+            return 0                                  # the app closed the pipe mid-job: done
         except Exception as exc:                      # tell the app, keep serving
             send({"error": f"{type(exc).__name__}: {exc}"[:300]})
 
