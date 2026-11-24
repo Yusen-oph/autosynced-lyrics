@@ -151,7 +151,10 @@ _SCHEMA = {
 # one of these (letters may be stretched: "ohhhh", "yeahhh"); one real word and it's sent.
 _SYLLABLE = (r"o+h*|a+h*|e+h*|u+h*|h?m+|hm+|ye+a*h*|ye+h+|ya+h*|yo+|la+|na+|da+|do+|du+m+|"
              r"ba+|be+|bo+p+|bu+m+|bi+ng|ra+|ta+|sha+|shoo+|wo+p+|wo+|woo+|wee+|hoo+|ho+|ha+|"
-             r"he+y*|ey+|ay+e*|whoa+|woah+|ooh+|huh|aha+|uh|sk+r+t+|br+|sh+|tra+")
+             r"he+y*|ey+|ay+e*|whoa+|woah+|ooh+|huh|aha+|uh|sk+r+t+|br+|sh+|tra+|"
+             # scat / drum sounds: "dum dum di-di-dum", "ding dong", "ba-dum-tss", "pa-pa-pam"
+             r"di+|dee+|di+n+g*|du+n+|do+n+g|ba+m+|da+m+|pa+m*|pu+m+|ti+|tu+|tss+|"
+             r"ri+|ru+|li+|lu+|ni+|nu+|bi+|bu+|ki+|ku+|zi+|zu+")
 _SOUND = re.compile(rf"^(?:{_SYLLABLE})$")
 # Sounds written joined together: "lalala", "hahaha", "nanana", "ohoh" (one syllable repeated).
 # Not ma/pa, so "mama" / "papa" (real words) are still translated.
