@@ -100,6 +100,13 @@ def attach_krc(lyr: Lyrics, krc: dict | None) -> None:
         return
     from difflib import SequenceMatcher
     k_lines, k_tr = krc["lines"], krc["translations"]
+    # Their copy may be timed differently (longer intro, another edit): find out by how
+    # much from lines with the same words, and line their copy up before matching, so a
+    # few seconds' difference doesn't leave every line without its translation.
+    shift = _timing_offset(lyr.lines, k_lines)
+    if shift:
+        k_lines = [(ks - shift, ke - shift, jt, [(o, a - shift, b - shift) for o, a, b in jw])
+                   for ks, ke, jt, jw in k_lines]
 
     def score(js, key, t):
         kk = "".join(_squash(k_lines[j][2]) for j in js)
@@ -149,6 +156,46 @@ def attach_krc(lyr: Lyrics, krc: dict | None) -> None:
             if lyr.char_times[i]:
                 timed.append(i)
     _align_word_timing(lyr, timed)
+    _share_translations(lyr)
+
+
+def _timing_offset(ours, theirs) -> float:
+    """How much later their lines come than ours (s), from lines whose words are the same
+    and appear only once on each side (so a repeated chorus can't pair up wrongly).
+    0 if it's under half a second or there's too little to go on."""
+    def once(lines, get_text, get_time):
+        seen = {}
+        for ln in lines:
+            k = _squash(get_text(ln))
+            if len(k) >= 6:
+                seen.setdefault(k, []).append(get_time(ln))
+        return {k: v[0] for k, v in seen.items() if len(v) == 1}
+    a = once(ours, lambda l: l[1], lambda l: l[0])
+    b = once(theirs, lambda l: l[2], lambda l: l[0])
+    diffs = sorted(b[k] - a[k] for k in a.keys() & b.keys())
+    if len(diffs) < 3:
+        return 0.0
+    mid = diffs[len(diffs) // 2]
+    close = [d for d in diffs if abs(d - mid) <= 1.0]
+    if len(close) < max(3, len(diffs) // 2):     # no clear single offset: leave it
+        return 0.0
+    off = sum(close) / len(close)
+    return off if abs(off) >= 0.5 else 0.0
+
+
+def _share_translations(lyr: Lyrics) -> None:
+    """A line with no translation gets the one of another line with exactly the same words
+    (a repeated chorus line), instead of being sent to the AI translator."""
+    by_text = {}
+    for (_, text), tr in zip(lyr.lines, lyr.translations):
+        k = _squash(text)
+        if k and tr and k not in by_text:
+            by_text[k] = tr
+    for i, (_, text) in enumerate(lyr.lines):
+        if not lyr.translations[i]:
+            tr = by_text.get(_squash(text))
+            if tr:
+                lyr.translations[i] = tr
 
 
 NATURAL_LEAD = 0.05   # lyric lines usually start this much before the first word is sung
@@ -655,7 +702,7 @@ def remember_extras(title: str, artist: str, duration: float, lyr: Lyrics) -> No
         cache.put(title, artist, duration, _to_cache(lyr), keep_age=True)
 
 
-EXTRAS_VERSION = 3   # bump when translations / word timing are worked out differently:
+EXTRAS_VERSION = 4   # bump when translations / word timing are worked out differently:
                      # cached ones from before are then looked up again (lyrics are kept)
 
 
