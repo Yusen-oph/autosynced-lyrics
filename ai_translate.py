@@ -91,7 +91,7 @@ def _load() -> dict:
 def known(title: str, artist: str) -> dict[str, str]:
     """{original line: AI translation} made earlier for this song."""
     with _lock:
-        return dict(_load().get(_song(title, artist), {}))
+        return {k: tidy(v) for k, v in _load().get(_song(title, artist), {}).items()}
 
 
 def _remember(title: str, artist: str, pairs: dict[str, str]) -> None:
@@ -134,6 +134,7 @@ Translate in the spirit of 信达雅: faithful to the meaning (信), natural and
 - Keep each translation to one line, about as long as the original line; it is read in a second or two while the song plays.
 - Carry the song's mood, imagery and wordplay; idioms become natural Chinese equivalents.
 - Keep names and brands as they are commonly written in Chinese; leave pure vocal sounds (oh, yeah, la la) as short sounds or leave them as they are.
+- A word repeated as an echo or backing vocal ("dead, dead, dead") is translated once or as a natural phrase, never as one Chinese character over and over (not 死死死死).
 - Where human translations of nearby lines are given, match their wording and tone.
 - Do not censor or soften explicit language; translate it faithfully."""
 
@@ -178,13 +179,30 @@ def has_kana(lines) -> bool:
     return any(re.search(r"[぀-ヿ]", t or "") for t in lines)
 
 
+def is_echo(text: str) -> bool:
+    """One word said 3+ times and nothing else, like "dead, dead, dead" or "(go go go)":
+    a background echo, clear as it is (translated it reads like 死死死死)."""
+    words = re.findall(r"[^\W\d_]+(?:'[^\W\d_]+)?", text.lower())
+    return len(words) >= 3 and len(set(words)) == 1
+
+
+# The same Chinese character 3+ times in a row (maybe with commas / spaces): kept once.
+# Laughs and sung sounds (哈哈哈, 啦啦啦) are left alone.
+_CHAR_RUN = re.compile(r"([一-鿿])(?:[\s,，、.。!！~～…-]*\1){2,}")
+_SOUND_CHARS = set("哈啦呀哦啊嘿嗯呜喔噢耶嘻呵吧哒嘟咚当叮滴")
+
+
+def tidy(zh: str) -> str:
+    return _CHAR_RUN.sub(lambda m: m.group(0) if m.group(1) in _SOUND_CHARS else m.group(1), zh)
+
+
 def worth_translating(text: str, japanese_song: bool = False) -> bool:
     """A real lyric line in any language but Chinese (not empty, a ♪, a credit, only
     sounds, or already Chinese). japanese_song: kanji-only lines count as Japanese."""
     t = text.strip()
     if not re.search(r"\w", t) or re.search(r"(作词|作曲|编曲|lyrics by|composed by)\s*[:：]", t, re.I):
         return False
-    if is_sounds(t):
+    if is_sounds(t) or is_echo(t):
         return False
     han = len(re.findall(r"[一-鿿]", t))
     kana = re.search(r"[぀-ヿ]", t)
@@ -236,7 +254,7 @@ def translate(title: str, artist: str, texts: list[str], human: list[str | None]
     for item in json.loads(text).get("lines", []):
         n, zh = item.get("n"), (item.get("zh") or "").strip()
         if n in todo and zh:
-            got[n] = zh
+            got[n] = tidy(zh)
     if got:
         _remember(title, artist, {texts[i]: zh for i, zh in got.items()})
     out.update(got)
