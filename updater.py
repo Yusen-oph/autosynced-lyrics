@@ -146,6 +146,27 @@ def cleanup() -> None:
     shutil.rmtree(app_dir / "_update_tmp", ignore_errors=True)
 
 
+def unblock() -> None:
+    """Remove Windows' "downloaded from the internet" mark from the app's own files.
+
+    Files unzipped from a downloaded zip all carry it, and .NET refuses to load DLLs that
+    do, so the app window (WebView2, loaded through .NET) can't start and the app falls
+    back to the old settings window. Checks one file first, so normally this costs nothing."""
+    if not paths.FROZEN:
+        return
+    import os
+    app_dir = installer.running_exe().parent
+    probe = next((app_dir / "_internal").rglob("Microsoft.Web.WebView2.Core.dll"), None)
+    if probe is None or not os.path.exists(f"{probe}:Zone.Identifier"):
+        return
+    for f in app_dir.rglob("*"):
+        if f.is_file():
+            try:
+                os.remove(f"{f}:Zone.Identifier")
+            except OSError:
+                pass
+
+
 # ---- updates from GitHub ---------------------------------------------------------
 # Each release on GitHub has three files: update.json (tiny, says which base the update
 # needs), AutosyncedLyrics-Update.zip (the small update) and AutosyncedLyrics-Windows.zip

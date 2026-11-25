@@ -565,6 +565,7 @@ if __name__ == "__main__":
         sys.exit(app_window.main(sys.argv))
     if "--uninstall" in sys.argv:                  # from Settings -> Apps -> Installed apps
         sys.exit(installer.run_uninstall())
+    updater.unblock()   # a copy unzipped from a download: let the app window load its DLLs
     if "--tray" not in sys.argv and installer.should_offer() and installer.offer_install():
         sys.exit(0)                                # the installed copy has been started
     events = queue.Queue()
