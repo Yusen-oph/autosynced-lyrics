@@ -90,8 +90,17 @@ def _watch_front(window) -> None:
 
 class _Api:
     """Called from the page (window.pywebview.api)."""
+    _window = None          # private: pywebview doesn't hand "_" names to the page
+
     def set_style(self, style):
         _dress_window("day" if style == "day" else "night")
+
+    def set_fullscreen(self, on):
+        """Fill the whole screen (no title bar or taskbar) or go back to a normal window."""
+        w = self._window
+        if w is not None and bool(on) != bool(getattr(w, "fullscreen", False)):
+            w.toggle_fullscreen()
+        return bool(getattr(w, "fullscreen", False))
 
 
 def main(argv: list[str]) -> int:
@@ -108,9 +117,11 @@ def main(argv: list[str]) -> int:
         import webview
     except Exception:
         return 3                            # app falls back to the classic settings window
+    api = _Api()
     window = webview.create_window(TITLE, url, width=1200, height=780, min_size=(940, 620),
                                    background_color=BACKGROUND.get(style, "#121212"),
-                                   text_select=False, js_api=_Api())
+                                   text_select=False, js_api=api)
+    api._window = window
     window.events.shown += lambda: (_dress_window(style), None)[1]
     window.events.loaded += lambda: (_watch_front(window), None)[1]
     try:

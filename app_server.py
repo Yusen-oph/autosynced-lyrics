@@ -12,8 +12,10 @@ import os
 import mimetypes
 import re
 import secrets
+import subprocess
 import threading
 import time
+import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -37,6 +39,7 @@ ALLOWED = {   # text settings that only take these values
     "cover_source": ("album", "gradient", "none"),
     "cover_shape": ("square", "rounded", "circle", "vinyl", "cd", "polaroid"),
     "cover_motion": ("still", "spin", "float", "sway", "pulse", "tilt"),
+    "ai_provider": tuple(ai_translate.PROVIDERS),
 }
 
 
@@ -241,10 +244,13 @@ class AppServer:
                 "font_family": fonts.family_names(),
                 "animation": [[label, value] for label, value in ANIMATIONS.items()],
                 "player": [[label, value] for label, value in PLAYER_CHOICES.items()],
+                "ai_provider": [[name, p] for p, (name, *_) in ai_translate.PROVIDERS.items()],
             },
             "startup": config.startup_enabled(),
             "cache": {"count": cache.count(), "kb": round(cache.size() / 1024)},
             "ai_key": ai_translate.has_key(),
+            "ai_keys": {p: ai_translate.has_key(p) for p in ai_translate.PROVIDERS if p != "machine"},
+            "ai_key_sites": {p: v[3] for p, v in ai_translate.PROVIDERS.items() if v[3]},
             "ai_status": app.ai_status,
             "about": {"version": installer.VERSION, "installed": installer.is_installed_copy(),
                       "packaged": paths.FROZEN, "location": str(installer.running_exe().parent),
@@ -315,15 +321,16 @@ class AppServer:
         return {"count": 0, "kb": 0}
 
     def _post_ai_key(self, b):
+        provider = str(b.get("provider", "claude"))
         if b.get("remove"):
-            ai_translate.set_key(None)
+            ai_translate.set_key(None, provider)
         else:
             key = str(b.get("key", "")).strip()
             if not key:
                 raise ValueError("empty key")
-            ai_translate.set_key(key)
+            ai_translate.set_key(key, provider)
             self._run_on_app(self.app.settings_changed)
-        return {"ai_key": ai_translate.has_key()}
+        return {"ai_key": ai_translate.has_key(provider), "provider": provider}
 
     # ---- my lyrics -----------------------------------------------------------------
     def _get_mylyrics(self, q):
@@ -334,6 +341,23 @@ class AppServer:
         if f.parent != lyrics_api.USER_DIR.resolve() or f.suffix.lower() != ".lrc" or not f.exists():
             raise ValueError("no such file")
         return f
+
+    def _post_mylyrics_export(self, b):
+        """All your lyrics in one zip in Downloads (for the phone app's Import), shown in Explorer."""
+        files = sorted(lyrics_api.USER_DIR.glob("*.lrc")) if lyrics_api.USER_DIR.exists() else []
+        if not files:
+            return {"count": 0}
+        out = Path.home() / "Downloads"
+        if not out.is_dir():
+            out = Path.home()
+        out = out / "AutosyncedLyrics-my-lyrics.zip"
+        tmp = out.with_suffix(".tmp")
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
+            for f in files:
+                z.write(f, f.name)
+        os.replace(tmp, out)
+        subprocess.Popen(["explorer", "/select,", str(out)])
+        return {"count": len(files), "name": out.name, "path": str(out)}
 
     def _post_mylyrics_delete(self, b):
         f = self._user_file(b.get("file"))

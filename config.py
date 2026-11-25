@@ -46,7 +46,8 @@ DEFAULTS = {
     "show_progress": True,         # thin song-progress line along the bottom
     "show_translation": False,     # Chinese translation under each line (layout unchanged when off)
     "translation_size_pct": 60,
-    "ai_translate": False,         # fill lines without a translation using Claude (your API key)    # translation size, % of its line
+    "ai_translate": False,         # fill lines without a translation (see ai_provider)
+    "ai_provider": "claude",       # who fills them: claude / deepseek / qwen (your key) or machine (free)
     # animation
     "animation": "slide",
     "animation_ms": 350,

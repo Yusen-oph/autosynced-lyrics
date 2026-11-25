@@ -31,6 +31,7 @@ class Lyrics:
         self.online = False          # found online (so it may be cached), not one of yours
         self.ai_lines: set[int] = set()   # translations written by Claude (see ai_translate)
         self.ai_checked = False
+        self.ai_provider = None             # who wrote ai_lines
         # Fixing lyrics timed for another version of the song, by listening (see retime()):
         self.heard_starts: dict[int, float] = {}   # line index -> when it was actually sung
         self.heard_lines: set[int] = set()         # lines whose word timing came from listening
@@ -386,7 +387,7 @@ def _query(title: str, artist: str, album: str, duration: float) -> dict | None:
     except (requests.RequestException, ValueError) as exc:
         rec, lrclib_error = None, exc
     if rec and rec.get("syncedLyrics"):
-        return {**rec, "source": "LRCLIB"}
+        return _right_language(rec, title, artist, duration) or {**rec, "source": "LRCLIB"}
     for find in (sources.netease, sources.qq_music, sources.kugou):
         try:
             found = find(title, artist, duration)
@@ -398,6 +399,58 @@ def _query(title: str, artist: str, album: str, duration: float) -> dict | None:
         return {**rec, "source": "LRCLIB"}       # untimed lyrics from LRCLIB
     if lrclib_error:
         raise lrclib_error
+    return None
+
+
+# "甲乙丙丁 - 粵語版" (Cantonese version) etc.: LRCLIB often has the usual-language lyrics
+# uploaded under that name. Chinese sites know these versions.
+_LANG_VER = re.compile(r"\s*[-–(（\[]?\s*(粵語|粤语|國語|国语|台語|台语|閩南語|闽南语|客語|客语|日語|日语|日文|韓語|韩语|英文|英語|英语)"
+                       r"\s*(版|ver(sion)?\.?)\s*[)）\]]?", re.I)
+_SIMPLIFIED = str.maketrans("粵語國閩韓", "粤语国闽韩")
+
+
+def _language_version(title: str):
+    """(title without the tag, tag) for a language version like "Song - 粵語版", else None."""
+    m = _LANG_VER.search(title)
+    if not m:
+        return None
+    base = (title[:m.start()] + title[m.end():]).strip(" -–")
+    return (base, m.group(1) + "版") if base else None
+
+
+def _text_lines(rec: dict | None) -> set:
+    return {_squash(w) for _, w in parse_lrc((rec or {}).get("syncedLyrics") or "")} - {""}
+
+
+def _shared(a: set, b: set) -> float:
+    return len(a & b) / len(a) if a else 0.0
+
+
+def _right_language(rec: dict, title: str, artist: str, duration: float) -> dict | None:
+    """For a language version: if LRCLIB's copy is just the usual version's lyrics, the
+    version from QQ Music / NetEase instead (None = keep LRCLIB's). Asked only for
+    such titles: one LRCLIB request plus a few small searches."""
+    lv = _language_version(title)
+    if not lv:
+        return None
+    base, tag = lv
+    try:
+        usual = _text_lines(_lrclib(base, artist, "", duration))
+    except (requests.RequestException, ValueError):
+        return None
+    if _shared(_text_lines(rec), usual) < 0.6:
+        return None                             # LRCLIB's copy really is different
+    han = "".join(re.findall(r"[㐀-鿿]+", base))
+    tags = dict.fromkeys([tag.translate(_SIMPLIFIED), tag])
+    queries = dict.fromkeys(f"{b} {t}" for b in dict.fromkeys(x for x in (han, base) if x) for t in tags)
+    for q in queries:
+        for find in (sources.qq_music, sources.netease):
+            try:
+                found = find(q, artist, duration)
+            except (requests.RequestException, ValueError, KeyError):
+                continue
+            if found and _shared(_text_lines(found), usual) < 0.6:
+                return found
     return None
 
 
@@ -680,7 +733,9 @@ def fetch_local(title: str, artist: str, duration: float = 0, use_cache: bool = 
         return True, from_text(mine)
     if use_cache:
         hit, d = cache.get(title, artist, duration)
-        if hit and d.get("lv") == LOOKUP_VERSION:
+        # language versions (粵語版…) were picked wrongly before version 3: redo just those
+        need = LOOKUP_VERSION if _language_version(title) else 2
+        if hit and need <= (d.get("lv") or 0) <= LOOKUP_VERSION:
             return True, _from_cache(d)
         # else: picked the old way (before the first-exact-version rule): look it up again
     return False, None
@@ -794,7 +849,7 @@ def apply_retime(lyr: Lyrics) -> bool:
     return True
 
 
-LOOKUP_VERSION = 2   # bump when versions are picked differently: older cached picks are redone
+LOOKUP_VERSION = 3   # bump when versions are picked differently: older cached picks are redone
 
 
 def _to_cache(lyr: Lyrics | None) -> dict | None:

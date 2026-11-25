@@ -41,6 +41,7 @@
   <!-- Now Playing -->
   <section class="page" id="page-now">
     <div class="np-bg" aria-hidden="true"><div class="np-art"></div></div>
+    <button class="full-btn" id="btnFull" title="Full screen (F11)"><svg class="go" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg><svg class="out" viewBox="0 0 24 24"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg></button>
     <div class="np">
       <div class="np-left">
         <div class="record" id="record"></div>
@@ -69,7 +70,10 @@
     <header class="page-head">
       <div><div class="eyebrow">Library</div><h1>My Lyrics</h1>
       <p class="sub" id="libSub">Lyrics you synced yourself. They always take priority over lyrics found online.</p></div>
-      <button class="btn primary" id="libOpenEditor"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Sync a new song</button>
+      <div class="head-actions">
+        <button class="btn ghost" id="libToPhone" title="Saves all your lyrics in one zip in Downloads, to send to your phone and import in the Android app"><svg viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg>Send to phone</button>
+        <button class="btn primary" id="libOpenEditor"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Sync a new song</button>
+      </div>
     </header>
     <div class="table-card">
       <table class="table" id="libTable">
@@ -183,14 +187,14 @@
   <!-- AI usage -->
   <section class="page" id="page-usage">
     <header class="page-head">
-      <div><div class="eyebrow">Claude API</div><h1>AI Usage</h1>
+      <div><div class="eyebrow">AI translation</div><h1>AI Usage</h1>
       <p class="sub">Every AI translation request, with what it cost. Each line is translated once; replays are free.</p></div>
       <button class="btn ghost" id="usageRefresh">Refresh</button>
     </header>
     <div class="stats">
       <div class="stat"><div class="stat-label">This month</div><div class="stat-value" id="stMonth">$0</div><div class="stat-sub" id="stMonthSongs"></div></div>
       <div class="stat"><div class="stat-label">All time</div><div class="stat-value" id="stAll">$0</div><div class="stat-sub" id="stAllSongs"></div></div>
-      <div class="stat"><div class="stat-label">Lines translated</div><div class="stat-value" id="stLines">0</div><div class="stat-sub">by Haiku 5.5 and Sonnet 5.5</div></div>
+      <div class="stat"><div class="stat-label">Lines translated</div><div class="stat-value" id="stLines">0</div><div class="stat-sub">by AI and machine translation</div></div>
     </div>
     <div class="table-card">
       <table class="table" id="usageTable">

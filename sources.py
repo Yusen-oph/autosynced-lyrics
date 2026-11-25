@@ -304,7 +304,35 @@ def _qq_lyric(mid: str) -> tuple[str, str]:
     return _qq_text(d.get("lyric")), _qq_text(d.get("trans"))
 
 
-_SITES = {"NetEase": (_netease_search, _netease_lyric), "QQ Music": (_qq_search, _qq_lyric)}
+# Migu (咪咕): its own human translations (.trc files) for some songs the others lack.
+# Asked only when NetEase and QQ Music have no translation.
+_MIGU = "https://app.c.nf.migu.cn/MIGUM2.0/v1.0/content/search_all.do"
+
+
+def _migu_search(title: str, artist: str, duration: float) -> list:
+    r = http.get(_MIGU, timeout=QUICK, headers={**BROWSER, "channel": "0146951"},
+                 params={"text": f"{title} {artist}", "pageNo": 1, "pageSize": 10,
+                         "searchSwitch": '{"song":1}'})
+    r.raise_for_status()
+    songs = (r.json().get("songResultData") or {}).get("result") or []
+    return _pick([((s["lyricUrl"], s["trcUrl"]), s.get("name", ""),
+                   " ".join(a.get("name", "") for a in s.get("singers") or []), 0)
+                  for s in songs if s.get("lyricUrl") and s.get("trcUrl")], title, artist, duration)
+
+
+def _migu_lyric(urls: tuple) -> tuple[str, str]:
+    out = []
+    for u in urls:
+        r = http.get(u, timeout=QUICK, headers=BROWSER)
+        r.raise_for_status()
+        r.encoding = "utf-8"
+        out.append(r.text)
+    return out[0], out[1]
+
+
+_SITES = {"NetEase": (_netease_search, _netease_lyric), "QQ Music": (_qq_search, _qq_lyric),
+          "Migu": (_migu_search, _migu_lyric)}
+_TRANSLATION_SITES = ("NetEase", "QQ Music")       # asked at once; Migu only if both have none
 
 
 def _synced(name: str, title: str, artist: str, duration: float) -> dict | None:
@@ -342,13 +370,17 @@ def translation(title: str, artist: str, duration: float) -> dict | None:
 
 
 def translation_jobs(title: str, artist: str, duration: float) -> list:
-    return [pool.submit(_guarded, name, _translation, name, title, artist, duration) for name in _SITES]
+    jobs = [pool.submit(_guarded, name, _translation, name, title, artist, duration)
+            for name in _TRANSLATION_SITES]
+    return jobs + [lambda: _guarded("Migu", _translation, "Migu", title, artist, duration)]
 
 
 def pick_translation(jobs: list) -> dict | None:
     """The first site's translation if it has one, else the next's; None after TRANSLATION_WAIT."""
     deadline = time.monotonic() + TRANSLATION_WAIT
     for job in jobs:
+        if callable(job):
+            return job()            # fallback, asked only now (its own short timeouts)
         try:
             found = job.result(timeout=max(0.0, deadline - time.monotonic()))
         except TimeoutError:

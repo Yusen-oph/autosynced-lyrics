@@ -184,7 +184,8 @@ class App:
         self.watcher.player = self.settings["player"]
         if self._wants_extras() and self.lyrics and not self.lyrics.extras_loaded:
             self.track_key = None            # reload to fetch translations / word timing
-        elif self._ai_wanted() and self.lyrics and not self.lyrics.ai_checked:
+        elif self._ai_wanted() and self.lyrics and (
+                not self.lyrics.ai_checked or self.lyrics.ai_provider != self.settings["ai_provider"]):
             self.track_key = None            # reload to fill missing lines with AI translation
         self.overlay.apply()
 
@@ -376,13 +377,14 @@ class App:
 
     def _ai_wanted(self) -> bool:
         return bool(self.settings["show_translation"] and self.settings["ai_translate"]
-                    and ai_translate.has_key())
+                    and ai_translate.has_key(self.settings["ai_provider"]))
 
     def _ai_fill(self, track, lyr):
-        """Claude translations for the lines no site translated (runs on the loading thread)."""
+        """AI / machine translations for the lines no site translated (runs on the loading thread)."""
         if not self._ai_wanted() or lyr.ai_checked:
             return
         lyr.ai_checked = True
+        lyr.ai_provider = self.settings["ai_provider"]
         texts = [t for _, t in lyr.lines]
         # Every line that isn't Chinese, in any language (also the English lines of a
         # mostly-Chinese song). In a Japanese song, kanji-only lines are Japanese too.
@@ -392,12 +394,13 @@ class App:
         if not want:
             return
         try:
-            got = ai_translate.translate(track.title, track.artist, texts, lyr.translations, want)
+            got = ai_translate.translate(track.title, track.artist, texts, lyr.translations, want,
+                                         provider=self.settings["ai_provider"])
         except Exception as exc:
-            self.ai_status = f"AI translation failed: {str(exc)[:120]}"
-            self._pending_flash = "AI translation failed (see Settings)"
+            self.ai_status = f"Translation failed: {str(exc)[:120]}"
+            self._pending_flash = "Translation failed (see Settings)"
             return
-        self.ai_status = f"AI translated {len(got)} line(s) of the last song"
+        self.ai_status = f"Translated {len(got)} line(s) of the last song"
         for i, zh in got.items():
             if not lyr.translations[i]:
                 lyr.translations[i] = zh

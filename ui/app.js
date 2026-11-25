@@ -53,8 +53,33 @@ function showPage(name) {
   if (name === "settings") loadSettings();
   if (name === "usage") loadUsage();
   if (name === "now") requestAnimationFrame(() => scrollToNow(true));
+  else if (document.body.classList.contains("full")) setFull(false);
   try { localStorage.setItem("page", name); } catch (e) {}
 }
+
+// ---------------------------------------------------------------- full screen
+// Now Playing with just the cover and the lyrics, filling the screen. In the app window
+// the window itself goes full screen (pywebview); in a browser, the page does.
+async function setFull(on) {
+  document.body.classList.toggle("full", on);
+  $("#btnFull").title = on ? "Exit full screen (Esc)" : "Full screen (F11)";
+  try {
+    if (window.pywebview && window.pywebview.api.set_fullscreen) await window.pywebview.api.set_fullscreen(on);
+    else if (on && !document.fullscreenElement) await document.documentElement.requestFullscreen();
+    else if (!on && document.fullscreenElement) await document.exitFullscreen();
+  } catch (e) {}
+  requestAnimationFrame(() => scrollToNow(true));
+}
+$("#btnFull").onclick = () => setFull(!document.body.classList.contains("full"));
+document.addEventListener("fullscreenchange", () => {
+  if (!document.fullscreenElement && !window.pywebview && document.body.classList.contains("full")) setFull(false);
+});
+document.addEventListener("keydown", e => {
+  if (e.target.closest && e.target.closest("input, textarea, select")) return;
+  const full = document.body.classList.contains("full");
+  if (e.key === "F11" && $("#page-now").classList.contains("on")) { e.preventDefault(); setFull(!full); }
+  else if (e.key === "Escape" && full) { e.preventDefault(); setFull(false); }
+});
 $$(".nav").forEach(b => b.addEventListener("click", () =>
   b.dataset.page === "editor" ? openEditor() : showPage(b.dataset.page)));
 
@@ -328,7 +353,7 @@ function renderLyrics() {
     d.className = "line";
     d.dataset.i = i;
     d.innerHTML = `<div>${esc(l.text || "♪")}</div>` +
-      (l.tr ? `<div class="tr"><span>${esc(l.tr)}</span>${l.ai ? '<span class="ai-tag" title="Translated by AI (Claude)">AI</span>' : ""}</div>` : "");
+      (l.tr ? `<div class="tr"><span>${esc(l.tr)}</span>${l.ai ? '<span class="ai-tag" title="Not from a lyrics site: translated by AI or machine translation">AI</span>' : ""}</div>` : "");
     if (lyr.synced) d.addEventListener("click", () => seekTo(l.t, true));
     frag.appendChild(d);
   });
@@ -459,6 +484,13 @@ async function loadLibrary() {
   }
 }
 $("#libOpenEditor").onclick = () => { $("#edTitle").value = ""; openEditor(); };
+$("#libToPhone").onclick = async () => {
+  try {
+    const r = await api("mylyrics/export", {});
+    if (!r.count) { toast("No saved lyrics to send yet"); return; }
+    toast(`${r.count} song${r.count === 1 ? "" : "s"} saved to ${r.name} in Downloads. Send it to your phone, then tap Import in the Android app's settings.`);
+  } catch (e) { toast("Couldn't make the zip"); }
+};
 
 // ---------------------------------------------------------------- settings
 const SECTIONS = [
@@ -496,7 +528,8 @@ const SECTIONS = [
   { title: "Chinese translation", items: [
     { type: "toggle", key: "show_translation", label: "Show the Chinese translation under each line" },
     { type: "range", key: "translation_size_pct", label: "Translation size", hint: "% of the line", min: 30, max: 100, step: 5, unit: "%" },
-    { type: "toggle", key: "ai_translate", label: "Fill lines with no translation using AI", hint: "Claude, with your own API key: Haiku for a few missing lines, Sonnet for whole songs. Marked with an AI tag." },
+    { type: "toggle", key: "ai_translate", label: "Fill lines with no translation", hint: "Lines no lyrics site has translated are translated for you, marked with an AI tag." },
+    { type: "select", key: "ai_provider", label: "Translated by", choices: "ai_provider", hint: "Claude, DeepSeek or Qwen: 信达雅 style, with your own API key (pay-as-you-go). Machine translation: free and needs no key, but word-for-word." },
     { type: "apikey" },
   ]},
   { title: "Animation", items: [
@@ -653,34 +686,42 @@ function makeRow(it, s) {
       if (value === s[it.key]) o.selected = true;
       sel.appendChild(o);
     }
-    sel.onchange = () => save(it.key, sel.value);
+    sel.onchange = () => { save(it.key, sel.value); if (it.key === "ai_provider") renderSettings(); };
     return row(it.label, it.hint, sel);
   }
   if (it.type === "apikey") {
+    const prov = s.ai_provider || "claude";
+    const names = Object.fromEntries((S.choices.ai_provider || []).map(([n, v]) => [v, n]));
+    const name = names[prov] || "Claude";
+    if (prov === "machine")
+      return row("No key needed", "Free (MyMemory, about 5,000 characters a day; translated lines are kept, so replays are free)." +
+                 (S.ai_status ? " " + S.ai_status : ""), null);
+    const has = !!(S.ai_keys || {})[prov];
     const wrap = document.createElement("div");
     wrap.className = "ctl";
     const inp = document.createElement("input");
-    Object.assign(inp, { type: "password", placeholder: S.ai_key ? "Saved — paste to replace" : "Paste your key", autocomplete: "off" });
+    Object.assign(inp, { type: "password", placeholder: has ? "Saved — paste to replace" : "Paste your key", autocomplete: "off" });
     inp.style.width = "220px";
     const saveBtn = document.createElement("button");
     saveBtn.className = "btn small primary"; saveBtn.textContent = "Save";
     saveBtn.onclick = async () => {
       if (!inp.value.trim()) return;
-      try { const r = await api("ai-key", { key: inp.value.trim() }); S.ai_key = r.ai_key; inp.value = ""; toast("API key saved"); renderSettings(); }
+      try { const r = await api("ai-key", { key: inp.value.trim(), provider: prov }); S.ai_keys = { ...S.ai_keys, [prov]: r.ai_key }; inp.value = ""; toast("API key saved"); renderSettings(); }
       catch (e) { toast("Couldn't save the key"); }
     };
     wrap.append(inp, saveBtn);
-    if (S.ai_key) {
+    if (has) {
       const rm = document.createElement("button");
       rm.className = "btn small ghost"; rm.textContent = "Remove";
-      rm.onclick = async () => { await api("ai-key", { remove: true }); S.ai_key = false; toast("API key removed"); renderSettings(); };
+      rm.onclick = async () => { await api("ai-key", { remove: true, provider: prov }); S.ai_keys = { ...S.ai_keys, [prov]: false }; toast("API key removed"); renderSettings(); };
       wrap.append(rm);
     }
-    const hint = S.ai_key ? "Saved, encrypted for your Windows account." + (S.ai_status ? " " + S.ai_status : "")
-                          : "Create one at console.anthropic.com (pay-as-you-go).";
-    const r = row("Claude API key", hint, wrap);
+    const site = (S.ai_key_sites || {})[prov];
+    const hint = has ? "Saved, encrypted for your Windows account." + (S.ai_status ? " " + S.ai_status : "")
+                     : `Create one at ${site} (pay-as-you-go).`;
+    const r = row(`${name} API key`, hint, wrap);
     $("small", r).classList.add("key-status");
-    if (S.ai_key) $("small", r).classList.add("ok");
+    if (has) $("small", r).classList.add("ok");
     return r;
   }
   if (it.type === "startup") {

@@ -168,6 +168,26 @@ body[data-theme="day"] .cover.big { border-radius: 12px; }
 
 /* ---- now playing ---- */
 #page-now { padding: 0; overflow: hidden; }
+
+/* ---- full screen Now Playing: just the cover and the lyrics, bigger ---- */
+.full-btn { position: absolute; top: 14px; right: 16px; z-index: 5; width: 36px; height: 36px; border-radius: 50%;
+            display: grid; place-items: center; color: var(--sub); background: var(--panel-2); opacity: .7; transition: opacity .2s; }
+.full-btn:hover { opacity: 1; color: var(--text); }
+.full-btn svg { width: 18px; height: 18px; }
+.full-btn .out, body.full .full-btn .go { display: none; }
+body.full .full-btn .out { display: block; }
+body[data-theme="day"] #page-now .full-btn { background: rgba(255,255,255,.18); color: #fff; }
+body.full, body.full[data-theme] { grid-template-columns: 1fr; grid-template-rows: 1fr; grid-template-areas: "main"; }
+body.full .sidebar, body.full .player, body.full .update-banner, body.full .np-actions { display: none !important; }
+body.full .full-btn { opacity: 0; }
+body.full:hover .full-btn { opacity: .55; }
+body.full .np { grid-template-columns: minmax(300px, 38vw) 1fr; grid-template-rows: minmax(0, 1fr); gap: 5vw; padding: 7vh 5vw 4vh; }
+body.full .np-left { justify-content: center; }
+body.full .record { max-width: min(38vw, 62vh); }
+body.full .np-meta h1 { font-size: clamp(30px, 2.6vw, 52px); }
+body.full .np-artist { font-size: clamp(16px, 1.4vw, 26px); }
+body.full .lyrics { --lyric-size: clamp(30px, 3vw, 60px); gap: 3.2vh; }
+body.full .lyrics-panel { background: transparent !important; scrollbar-width: none; }
 .np { display: grid; grid-template-columns: minmax(260px, 340px) 1fr; gap: 36px; height: 100%; padding: 32px 36px 24px; }
 .np-left { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
 .np-meta h1 { font-size: 30px; font-weight: 800; letter-spacing: -.02em; line-height: 1.15;
@@ -644,3 +664,5 @@ body.quiet .table-card,
 body.quiet #page-now .btn.ghost { backdrop-filter: none !important; }
 body.low-cpu *,
 body.quiet * { transition-duration: 0s !important; }
+
+.head-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
