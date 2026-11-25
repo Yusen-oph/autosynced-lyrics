@@ -173,8 +173,14 @@ def is_sounds(text: str) -> bool:
     return bool(parts) and all(_SOUND.match(p) or _REPEATED.match(p) for p in parts)
 
 
-def worth_translating(text: str) -> bool:
-    """A real lyric line (not empty, a ♪, a credit, only sounds, or already Chinese)."""
+def has_kana(lines) -> bool:
+    """Any Japanese kana in the song (then its kanji-only lines are Japanese, not Chinese)."""
+    return any(re.search(r"[぀-ヿ]", t or "") for t in lines)
+
+
+def worth_translating(text: str, japanese_song: bool = False) -> bool:
+    """A real lyric line in any language but Chinese (not empty, a ♪, a credit, only
+    sounds, or already Chinese). japanese_song: kanji-only lines count as Japanese."""
     t = text.strip()
     if not re.search(r"\w", t) or re.search(r"(作词|作曲|编曲|lyrics by|composed by)\s*[:：]", t, re.I):
         return False
@@ -182,6 +188,8 @@ def worth_translating(text: str) -> bool:
         return False
     han = len(re.findall(r"[一-鿿]", t))
     kana = re.search(r"[぀-ヿ]", t)
+    if japanese_song:
+        return True
     return not (han and not kana and han >= len(re.findall(r"\w", t)) * 0.5)
 
 

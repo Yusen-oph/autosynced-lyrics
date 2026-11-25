@@ -377,12 +377,15 @@ class App:
 
     def _ai_fill(self, track, lyr):
         """Claude translations for the lines no site translated (runs on the loading thread)."""
-        if not self._ai_wanted() or lyr.is_chinese or lyr.ai_checked:
+        if not self._ai_wanted() or lyr.ai_checked:
             return
         lyr.ai_checked = True
         texts = [t for _, t in lyr.lines]
+        # Every line that isn't Chinese, in any language (also the English lines of a
+        # mostly-Chinese song). In a Japanese song, kanji-only lines are Japanese too.
+        japanese = ai_translate.has_kana(texts)
         want = [i for i, t in enumerate(texts)
-                if ai_translate.worth_translating(t) and not lyr.translations[i]]
+                if ai_translate.worth_translating(t, japanese) and not lyr.translations[i]]
         if not want:
             return
         try:
@@ -515,7 +518,7 @@ class App:
             pos = lambda: track.current_position() + fix
             i = lyr.index_at(pos())
             line = lambda j: (lyr.lines[j][1] or "♪") if 0 <= j < len(lyr.lines) else ""
-            tr_on = self.settings["show_translation"] and lyr.has_translation and not lyr.is_chinese
+            tr_on = self.settings["show_translation"] and lyr.has_translation
             tr = lambda j: ((AI_MARK if j in lyr.ai_lines else "") + (lyr.translations[j] or "")
                             if tr_on and 0 <= j < len(lyr.lines) and lyr.translations[j] else "")
             if i < 0:
