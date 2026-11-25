@@ -266,8 +266,8 @@ class App:
         """Open the main app window (or bring it to the front). Falls back to the classic
         settings window (or `fallback`) if the app window can't run on this PC."""
         fallback = fallback or self.open_settings
-        if self.window_proc is not None and self.window_proc.poll() is None:
-            app_window.bring_to_front()
+        if (self.window_proc is not None and self.window_proc.poll() is None) or app_window.is_open():
+            app_window.bring_to_front()          # it picks up the page to show (take_goto)
             return
         try:
             self.window_proc = app_window.launch(self.server.url, self.settings["ui_style"])
@@ -279,7 +279,10 @@ class App:
         def check():   # window process gave up straight away (no WebView2 etc.)
             if self.window_proc is not None and self.window_proc.poll() not in (None, 0):
                 self.window_proc = None
-                fallback()
+                if app_window.is_open():         # another copy of the window is showing: use it
+                    app_window.bring_to_front()
+                else:
+                    fallback()
         self.root.after(4000, check)
 
     def lyrics_saved(self):

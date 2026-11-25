@@ -13,8 +13,14 @@ import installer
 import updater
 
 
+HOW_TO_GET = ("**New here? Download AutosyncedLyrics-Windows.zip**, unzip it and run Autosynced Lyrics.exe.\n"
+              "Already have the app? Settings -> About -> Check now. (AutosyncedLyrics-Update.zip is "
+              "only for updating an installed copy: it can't run on its own.)\n\n")
+
+
 def main():
     notes = " ".join(sys.argv[1:]).strip() or f"Version {installer.VERSION}"
+    notes = HOW_TO_GET + notes
     tag = f"v{installer.VERSION}"
     exists = subprocess.run(["gh", "release", "view", tag, "--repo", updater.REPO],
                             capture_output=True).returncode == 0

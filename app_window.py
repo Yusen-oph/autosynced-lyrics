@@ -26,6 +26,11 @@ def launch(url: str, style: str) -> subprocess.Popen:
     return subprocess.Popen(cmd, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
 
 
+def is_open() -> bool:
+    """An app window is already on screen (maybe started by an earlier run of the app)."""
+    return bool(ctypes.windll.user32.FindWindowW(None, TITLE))
+
+
 def bring_to_front() -> None:
     user32 = ctypes.windll.user32
     hwnd = user32.FindWindowW(None, TITLE)
