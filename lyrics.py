@@ -733,7 +733,7 @@ def retime_offsets(times: list[float], heard: dict[int, float]) -> list[float] |
             keep.append((i, d))
     if len(keep) < RETIME_MIN_POINTS:
         return None
-    smooth = [(i, med([keep[k][1] for k in range(max(0, j - 2), min(len(keep), j + 3))]))
+    smooth = [(i, med([keep[k][1] for k in range(max(0, j - 1), min(len(keep), j + 2))]))
               for j, (i, _) in enumerate(keep)]
     if max(abs(d) for _, d in smooth) < RETIME_MIN_SHIFT:
         return None
@@ -751,6 +751,23 @@ def retime_offsets(times: list[float], heard: dict[int, float]) -> list[float] |
             off = left[1] + (right[1] - left[1]) * min(1.0, max(0.0, f))
         out.append(off)
     return out
+
+
+RETIME_GAP = 25.0         # listen again only this far (s) from lines already measured
+RETIME_ENOUGH = 8         # lines measured before the timing fix can be settled...
+RETIME_REACH = 0.8        # ...and they must reach this far into the song (by time): lyrics
+                          # are often right at the start and drift later on
+
+
+def retime_settled(lyr: Lyrics) -> bool:
+    """Enough of the song has been measured to trust the timing everywhere, not only at
+    the start."""
+    if len(lyr.heard_starts) < RETIME_ENOUGH or not lyr.lines:
+        return False
+    times = lyr.orig_times or [t for t, _ in lyr.lines]
+    last = times[-1] or 1.0
+    reached = max(times[i] for i in lyr.heard_starts if i < len(times))
+    return reached >= RETIME_REACH * last
 
 
 def apply_retime(lyr: Lyrics) -> bool:
@@ -789,7 +806,7 @@ def _to_cache(lyr: Lyrics | None) -> dict | None:
             "tr": [None if i in lyr.ai_lines else t for i, t in enumerate(lyr.translations)],
             "extras": lyr.extras_loaded, "extras_at": time.time(),
             "ct": [[r(c) for c in ct] if ct else None for ct in lyr.char_times],
-            "rt": len(lyr.heard_starts) if lyr.retimed else 0,
+            "rs": bool(lyr.retime_done),     # timing checked through the whole song
             "lv": LOOKUP_VERSION}   # lines already fixed by listening
 
 
@@ -802,6 +819,6 @@ def _from_cache(d: dict) -> Lyrics | None:
         lyr.translations = list(d["tr"])
         lyr.char_times = [[tuple(c) if c else None for c in ct] if ct else None for ct in d["ct"]]
         lyr.extras_loaded = bool(d.get("extras"))
-    lyr.retime_done = (d.get("rt") or 0) >= 6     # enough lines were checked last time
+    lyr.retime_done = bool(d.get("rs"))      # checked through the whole song last time
     lyr.online = True
     return lyr

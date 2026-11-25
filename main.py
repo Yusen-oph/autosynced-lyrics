@@ -443,13 +443,15 @@ class App:
         spent_ms = (time.perf_counter() - started) * 1000
         self.root.after(max(1, round(16 - spent_ms)) if animating else 16, self._tick)
 
-    RETIME_ENOUGH = 12      # lines measured before the timing fix is considered settled
-
     def _set_learn_target(self, track, lyr, words_on, fix_on):
         wanted = [i for i, (_, text) in enumerate(lyr.lines)
                   if words_on and lyrics_api._squash(text) and not lyrics_api.has_word_timing(lyr, i)]
-        measure = [i for i, (_, text) in enumerate(lyr.lines)
+        # Timing is checked in samples, not everywhere: parts of the song within RETIME_GAP s
+        # of a line already measured are skipped, so the speech model runs about half as long.
+        heard_t = [lyr.lines[i][0] for i in lyr.heard_starts if i < len(lyr.lines)]
+        measure = [i for i, (t, text) in enumerate(lyr.lines)
                    if fix_on and i not in lyr.heard_starts
+                   and all(abs(t - h) > lyrics_api.RETIME_GAP for h in heard_t)
                    and len(word_learner.word_slots(text)) >= word_learner.MEASURE_MIN_WORDS]
         self.learner.set_target(track.key, lyr.lines, wanted, measure)
 
@@ -459,8 +461,10 @@ class App:
         ready = track is not None and lyr is not None and lyr.synced and lyr.extras_loaded
         words_on = bool(ready and self.settings["learn_word_timing"] and self.settings["bouncing_note"])
         # Only lyrics found online get re-timed: ones you synced yourself are left as they are.
-        if lyr is not None and len(lyr.heard_starts) >= self.RETIME_ENOUGH:
-            lyr.retime_done = True               # enough to know the timing: stop listening for it
+        if lyr is not None and not lyr.retime_done and lyrics_api.retime_settled(lyr):
+            lyr.retime_done = True               # measured through the song: stop listening for it
+            if self.settings["cache_lyrics"] and track is not None:
+                lyrics_api.remember_extras(track.title, track.artist, track.duration, lyr)
         fix_on = bool(ready and self.settings["fix_timing_by_listening"] and lyr.online
                       and not lyr.retime_done)
         self.learner.enabled = words_on or fix_on
@@ -488,6 +492,8 @@ class App:
                 lyr.heard_starts.update(starts)
                 if lyrics_api.apply_retime(lyr):
                     changed = moved = True
+                else:
+                    self._set_learn_target(track, lyr, words_on, fix_on)   # skip the part just measured
         if moved:
             # Your own earlier/later fix for this song was making up for the same delay.
             if song_offsets.get(track.title, track.artist):
