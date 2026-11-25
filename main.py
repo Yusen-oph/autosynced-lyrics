@@ -20,6 +20,7 @@ import tkinter as tk
 import requests
 
 import ai_translate
+import cloud_sync
 import app_server
 import app_window
 import config
@@ -112,6 +113,7 @@ class App:
         self._learn_key = None
         self.icon = tray.start(events)
         self.server = app_server.AppServer(self)
+        cloud_sync.start(lambda: dict(self.settings))
         self.window_proc = None
         self.update_info = None          # a newer version on GitHub (updater.check())
         self.update_state = ""           # "", "downloading 40%", "installing", or an error

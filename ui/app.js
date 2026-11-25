@@ -532,6 +532,12 @@ const SECTIONS = [
     { type: "select", key: "ai_provider", label: "Translated by", choices: "ai_provider", hint: "Claude, DeepSeek or Qwen: 信达雅 style, with your own API key (pay-as-you-go). Machine translation: free and needs no key, but word-for-word." },
     { type: "apikey" },
   ]},
+  { title: "Sync to phone", items: [
+    { type: "toggle", key: "cloud_sync", label: "Keep the Android app's lyrics in sync through the cloud", hint: "Your lyrics and the lyrics cache (with translations) go to a WebDAV folder; the phone app reads them. Free WebDAV: Koofr (10 GB) or InfiniCLOUD (20 GB). Uploads only when something changed." },
+    { type: "text", key: "webdav_url", label: "WebDAV address", hint: "e.g. https://app.koofr.net/dav/Koofr", placeholder: "https://…" },
+    { type: "text", key: "webdav_user", label: "User name", hint: "Usually your e-mail for that service", placeholder: "" },
+    { type: "cloud" },
+  ]},
   { title: "Animation", items: [
     { type: "select", key: "animation", label: "Line change effect", choices: "animation" },
     { type: "range", key: "animation_ms", label: "Effect duration", min: 100, max: 1200, step: 50, unit: " ms" },
@@ -722,6 +728,43 @@ function makeRow(it, s) {
     const r = row(`${name} API key`, hint, wrap);
     $("small", r).classList.add("key-status");
     if (has) $("small", r).classList.add("ok");
+    return r;
+  }
+  if (it.type === "text") {
+    const inp = document.createElement("input");
+    Object.assign(inp, { type: "text", value: s[it.key] || "", placeholder: it.placeholder || "", autocomplete: "off", spellcheck: false });
+    inp.style.width = "260px";
+    inp.onchange = () => save(it.key, inp.value.trim());
+    return row(it.label, it.hint, inp);
+  }
+  if (it.type === "cloud") {
+    const c = S.cloud || {};
+    const wrap = document.createElement("div");
+    wrap.className = "ctl";
+    const inp = document.createElement("input");
+    Object.assign(inp, { type: "password", placeholder: c.password ? "Saved — paste to replace" : "App password", autocomplete: "off" });
+    inp.style.width = "160px";
+    const saveBtn = document.createElement("button");
+    saveBtn.className = "btn small primary"; saveBtn.textContent = "Save";
+    saveBtn.onclick = async () => {
+      if (!inp.value.trim()) return;
+      try { const r = await api("cloud/password", { password: inp.value.trim() }); S.cloud = { ...c, password: r.password }; inp.value = ""; toast("Password saved"); renderSettings(); }
+      catch (e) { toast("Couldn't save the password"); }
+    };
+    const syncBtn = document.createElement("button");
+    syncBtn.className = "btn small ghost"; syncBtn.textContent = "Sync now";
+    wrap.append(inp, saveBtn, syncBtn);
+    const hint = c.status || (c.password ? "Saved, encrypted for your Windows account." : "Make an app password on the service's website (not your login password).");
+    const r = row("App password", hint, wrap);
+    const note = $("small", r);
+    note.classList.add("key-status");
+    syncBtn.onclick = async () => {
+      await new Promise(ok => setTimeout(ok, 200));        // let a just-typed address save first
+      syncBtn.disabled = true; note.textContent = "Uploading…";
+      try { const res = await api("cloud/sync", {}); note.textContent = res.status; S.cloud = { ...S.cloud, status: res.status }; }
+      catch (e) { note.textContent = "Couldn't sync"; }
+      syncBtn.disabled = false;
+    };
     return r;
   }
   if (it.type === "startup") {

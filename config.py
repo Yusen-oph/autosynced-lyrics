@@ -47,7 +47,11 @@ DEFAULTS = {
     "show_translation": False,     # Chinese translation under each line (layout unchanged when off)
     "translation_size_pct": 60,
     "ai_translate": False,         # fill lines without a translation (see ai_provider)
-    "ai_provider": "claude",       # who fills them: claude / deepseek / qwen (your key) or machine (free)
+    "ai_provider": "claude",
+    # cloud sync to the phone (WebDAV; the password is kept apart, encrypted: cloud_sync.py)
+    "cloud_sync": False,
+    "webdav_url": "",
+    "webdav_user": "",       # who fills them: claude / deepseek / qwen (your key) or machine (free)
     # animation
     "animation": "slide",
     "animation_ms": 350,

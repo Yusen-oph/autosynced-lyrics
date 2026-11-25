@@ -21,6 +21,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import ai_translate
+import cloud_sync
 import cache
 import config
 import fonts
@@ -252,6 +253,7 @@ class AppServer:
             "ai_keys": {p: ai_translate.has_key(p) for p in ai_translate.PROVIDERS if p != "machine"},
             "ai_key_sites": {p: v[3] for p, v in ai_translate.PROVIDERS.items() if v[3]},
             "ai_status": app.ai_status,
+            "cloud": {"password": cloud_sync.has_password(), "status": cloud_sync.status},
             "about": {"version": installer.VERSION, "installed": installer.is_installed_copy(),
                       "packaged": paths.FROZEN, "location": str(installer.running_exe().parent),
                       "data": str(paths.DATA_DIR), "releases": updater.RELEASES_PAGE},
@@ -331,6 +333,14 @@ class AppServer:
             ai_translate.set_key(key, provider)
             self._run_on_app(self.app.settings_changed)
         return {"ai_key": ai_translate.has_key(provider), "provider": provider}
+
+    def _post_cloud_password(self, b):
+        cloud_sync.set_password(None if b.get("remove") else str(b.get("password", ""))[:500])
+        return {"password": cloud_sync.has_password()}
+
+    def _post_cloud_sync(self, b):
+        """Upload now (waits for it, so Settings can show how it went)."""
+        return {"status": cloud_sync.upload(dict(self.app.settings), force=True)}
 
     # ---- my lyrics -----------------------------------------------------------------
     def _get_mylyrics(self, q):
