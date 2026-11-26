@@ -10,6 +10,7 @@ const ED_UNSURE = /\[([^\[\]]+)\?\]/g;
 const ed = {
   lines: [],            // [{ t: seconds | null, text, guess }]
   sel: null,            // selected line
+  picked: new Set(),    // lines picked to move together (Shift-click a range, Ctrl-click one)
   syncing: false,
   target: null,         // line the next tap stamps
   history: [],          // tap undo: [{ i, t, guess }]
@@ -44,7 +45,7 @@ function edNext(i, step = 1) {
 function edSetText(text) {
   ed.lines = edParse(text);
   if (!ed.lines.length) ed.lines = [{ t: null, text: "", guess: false }];
-  ed.sel = null; ed.history = [];
+  ed.sel = null; ed.history = []; ed.picked.clear();
   if (ed.raw) $("#edRaw").value = edSerialize();
   edRender();
 }
@@ -53,7 +54,7 @@ function edSetText(text) {
 // One line's row (number, time chip, words, hover actions).
 function edRowClass(l, i) {
   return "ed-line" + (l.t != null ? " done" : "") + (l.guess ? " guess" : "") + (!l.text ? " blank" : "")
-    + (i === ed.sel ? " sel" : "") + (ed.syncing && i === ed.target ? " target" : "");
+    + (i === ed.sel ? " sel" : "") + (ed.picked.has(i) ? " picked" : "") + (ed.syncing && i === ed.target ? " target" : "");
 }
 const edTimeText = l => l.t != null ? stamp(l.t).slice(1, -1) : "--:--.--";
 
@@ -105,7 +106,29 @@ function edStats() {
   $("#edSynced").textContent = `${synced} / ${lyric.length}`;
   $("#edUnsure").textContent = unsure;
   $("#edProgressFill").style.width = lyric.length ? `${synced / lyric.length * 100}%` : "0";
+  edPickInfo();
 }
+
+// ---------------------------------------------------------------- moving some lines together
+// A verse timed for another version of the song: pick its lines (Shift-click the last one
+// after choosing the first, Ctrl-click to add or drop one, or "to the end"), then move them
+// with the shift buttons, or click a picked line's time while the song plays to move them all
+// so that line starts now.
+function edPickInfo() {
+  const n = ed.picked.size;
+  $("#edShiftLabel").textContent = n ? `Shift ${n} picked` : "Shift all";
+  $("#edPickClear").hidden = !n;
+  $("#edPickEnd").hidden = ed.sel == null;
+}
+function edPickRange(a, b) {
+  const [lo, hi] = a < b ? [a, b] : [b, a];
+  for (let i = lo; i <= hi; i++) if (isLyric(i)) ed.picked.add(i);
+}
+function edShiftLines(d, which) {
+  for (const i of which) { const l = ed.lines[i]; if (l && l.t != null) l.t = Math.max(0, l.t + d); }
+}
+const edMoving = () => ed.picked.size ? [...ed.picked] : ed.lines.map((_, i) => i);
+function edClearPicks() { const was = [...ed.picked]; ed.picked.clear(); edRefresh(...was); }
 
 function edScrollTo(i) {
   const row = $(`.ed-line[data-i="${i}"]`);
@@ -135,9 +158,25 @@ $("#edLines").addEventListener("click", e => {
     edRender();
     return;
   }
+  if ((e.shiftKey || e.ctrlKey) && !ed.syncing) {          // pick lines to move together
+    if (e.ctrlKey) { if (ed.picked.has(i)) ed.picked.delete(i); else ed.picked.add(i); }
+    else edPickRange(ed.sel ?? i, i);
+    const s = window.getSelection(); if (s) s.empty();       // no text highlight from Shift-click
+    edRender();
+    return;
+  }
   if (e.target.closest(".time") && !ed.syncing) {        // stamp this line with "now"
     if (!now.open) return toast("Play the song first");
-    l.t = Math.max(0, position() - edDelay()); l.guess = false;
+    const t = Math.max(0, position() - edDelay());
+    if (ed.picked.has(i) && l.t != null) {                // the picked lines all move with it
+      const d = t - l.t;
+      edShiftLines(d, ed.picked);
+      ed.picked.forEach(j => { ed.lines[j].guess = false; });
+      edRender();
+      edStatus(`${ed.picked.size} picked lines moved ${d > 0 ? "later" : "earlier"} by ${Math.abs(d).toFixed(2)} s`);
+      return;
+    }
+    l.t = t; l.guess = false;
   }
   const before = [ed.sel, ed.target];
   ed.sel = i;
@@ -218,6 +257,7 @@ document.addEventListener("keydown", e => {
   if (!$("#page-editor").classList.contains("on")) return;
   const typing = e.target instanceof Element && e.target.matches("input, textarea, select");
   if (e.ctrlKey && (e.key === "r" || e.key === "R")) { e.preventDefault(); edReplay(e.shiftKey); return; }
+  if (!ed.syncing && !typing && e.key === "Escape" && ed.picked.size) { e.preventDefault(); edClearPicks(); return; }
   if (!ed.syncing || typing) return;
   if (e.key === " " || e.key === "Enter") { e.preventDefault(); edTap(); }
   else if (e.key === "Backspace") { e.preventDefault(); edUndo(); }
@@ -257,9 +297,16 @@ $("#edSlow").onclick = () => edReplay(true);
 // ---------------------------------------------------------------- bulk edits & raw text
 $$("[data-shift]").forEach(b => b.onclick = () => {
   const d = parseFloat(b.dataset.shift);
-  ed.lines.forEach(l => { if (l.t != null) l.t = Math.max(0, l.t + d); });
-  edRender(); edStatus(`All times moved ${d > 0 ? "later" : "earlier"} by ${Math.abs(d)} s`);
+  edShiftLines(d, edMoving());
+  edRender();
+  edStatus(`${ed.picked.size ? ed.picked.size + " picked lines" : "All times"} moved ${d > 0 ? "later" : "earlier"} by ${Math.abs(d)} s`);
 });
+$("#edPickClear").onclick = edClearPicks;
+$("#edPickEnd").onclick = () => {                          // the chosen line and everything after it
+  if (ed.sel == null) return;
+  edPickRange(ed.sel, ed.lines.length - 1);
+  edRender();
+};
 $("#edClear").onclick = async () => {
   if (await confirmBox("Clear all times?", "Every line loses its timing; the words stay.", "Clear")) {
     ed.lines.forEach(l => { l.t = null; l.guess = false; }); edRender();

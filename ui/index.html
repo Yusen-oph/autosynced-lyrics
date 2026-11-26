@@ -125,16 +125,18 @@
         <div class="ed-lines-head">
           <span id="edCount">0 lines</span>
           <span class="ed-grow"></span>
-          <span class="ed-shift">Shift all
-            <button class="chip small" data-shift="-0.5">−0.5</button><button class="chip small" data-shift="-0.1">−0.1</button>
-            <button class="chip small" data-shift="0.1">+0.1</button><button class="chip small" data-shift="0.5">+0.5</button></span>
+          <button class="chip small" id="edPickEnd" hidden title="Pick the chosen line and every line after it">Pick to the end</button>
+          <button class="chip small" id="edPickClear" hidden title="Stop picking (Esc)">Clear picks</button>
+          <span class="ed-shift"><span id="edShiftLabel">Shift all</span>
+            <button class="chip small" data-shift="-1">−1</button><button class="chip small" data-shift="-0.5">−0.5</button><button class="chip small" data-shift="-0.1">−0.1</button>
+            <button class="chip small" data-shift="0.1">+0.1</button><button class="chip small" data-shift="0.5">+0.5</button><button class="chip small" data-shift="1">+1</button></span>
           <button class="chip small" id="edClear">Clear times</button>
           <button class="chip small" id="edRawBtn">Edit as text</button>
         </div>
         <div class="ed-lines" id="edLines"></div>
         <textarea class="ed-raw" id="edRaw" spellcheck="false" hidden
           placeholder="Paste or type the lyrics here, one line per lyric line. Timings like [01:23.45] are optional."></textarea>
-        <div class="ed-hint" id="edHint">Click a line to choose it. Double-click to edit its words. Hover for more.</div>
+        <div class="ed-hint" id="edHint">Click a line to choose it. Double-click to edit its words. Shift-click to pick a range of lines (Ctrl-click: one line) and move just those with Shift; or click a picked line's time while the song plays to move them all so it starts now.</div>
       </div>
 
       <aside class="ed-side">

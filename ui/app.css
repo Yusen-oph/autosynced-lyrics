@@ -596,6 +596,8 @@ body[data-theme="night"] .ed-line.done .time { color: var(--accent); }
 .ed-line.blank .words { color: var(--faint); font-style: italic; }
 .ed-line .words input { width: 100%; font: inherit; padding: 3px 6px; }
 .ed-line.sel { background: var(--hover); box-shadow: inset 3px 0 0 var(--sub); }
+.ed-line.picked { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+.ed-line.picked.sel { box-shadow: inset 3px 0 0 var(--accent), inset 0 0 0 1px var(--accent); }
 .ed-line.target { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
 .ed-line.target .words { font-weight: 700; }
 .ed-line.playing-now .num { color: var(--accent); font-weight: 700; }
