@@ -113,12 +113,21 @@ class _Api:
 
 
 def _square_edges(full: bool) -> None:
-    """Full screen: no rounded corners and no 1-px window outline (Windows 11 draws a light
-    one around the window, most visible on the Day style); back to normal when leaving."""
+    """Full screen: no rounded corners and no 1-px window outline; back to normal when leaving.
+    pywebview's window shadow (on by default) pulls the Windows frame 1 px into the window,
+    and that frame -- a light outline with Windows 11's rounded corners -- stays drawn even
+    without a title bar. So in full screen the frame comes out and Windows stops drawing it."""
     hwnd = ctypes.windll.user32.FindWindowW(None, TITLE)
     if not hwnd:
         return
     dwm = ctypes.windll.dwmapi
+
+    class _Margins(ctypes.Structure):
+        _fields_ = [("l", ctypes.c_int), ("r", ctypes.c_int), ("t", ctypes.c_int), ("b", ctypes.c_int)]
+    m = 0 if full else 1                                     # pywebview's own value is 1
+    dwm.DwmExtendFrameIntoClientArea(hwnd, ctypes.byref(_Margins(m, m, m, m)))
+    policy = ctypes.c_int(1 if full else 2)                  # DWMNCRP_DISABLED / ENABLED (pywebview: 2)
+    dwm.DwmSetWindowAttribute(hwnd, 2, ctypes.byref(policy), 4)   # DWMWA_NCRENDERING_POLICY
     corner = ctypes.c_int(1 if full else 0)                  # DWMWCP_DONOTROUND / DEFAULT
     border = ctypes.c_uint(0xFFFFFFFE if full else 0xFFFFFFFF)   # DWMWA_COLOR_NONE / DEFAULT
     dwm.DwmSetWindowAttribute(hwnd, 33, ctypes.byref(corner), 4)  # DWMWA_WINDOW_CORNER_PREFERENCE
