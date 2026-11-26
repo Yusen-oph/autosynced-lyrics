@@ -98,9 +98,42 @@ class _Api:
     def set_fullscreen(self, on):
         """Fill the whole screen (no title bar or taskbar) or go back to a normal window."""
         w = self._window
-        if w is not None and bool(on) != bool(getattr(w, "fullscreen", False)):
+        if w is None:
+            return False
+        # pywebview never updates window.fullscreen after toggle_fullscreen(), so ask the
+        # native window itself; trusting the stale flag made Exit a no-op and the next
+        # "full screen" toggle back to a normal window (title bar showing).
+        if bool(on) != _is_full(w):
             w.toggle_fullscreen()
-        return bool(getattr(w, "fullscreen", False))
+            w.fullscreen = bool(on)
+        _square_edges(bool(on))
+        import threading
+        threading.Timer(0.3, _square_edges, (bool(on),)).start()   # again once Windows settles
+        return _is_full(w)
+
+
+def _square_edges(full: bool) -> None:
+    """Full screen: no rounded corners and no 1-px window outline (Windows 11 draws a light
+    one around the window, most visible on the Day style); back to normal when leaving."""
+    hwnd = ctypes.windll.user32.FindWindowW(None, TITLE)
+    if not hwnd:
+        return
+    dwm = ctypes.windll.dwmapi
+    corner = ctypes.c_int(1 if full else 0)                  # DWMWCP_DONOTROUND / DEFAULT
+    border = ctypes.c_uint(0xFFFFFFFE if full else 0xFFFFFFFF)   # DWMWA_COLOR_NONE / DEFAULT
+    dwm.DwmSetWindowAttribute(hwnd, 33, ctypes.byref(corner), 4)  # DWMWA_WINDOW_CORNER_PREFERENCE
+    dwm.DwmSetWindowAttribute(hwnd, 34, ctypes.byref(border), 4)  # DWMWA_BORDER_COLOR
+
+
+def _is_full(w) -> bool:
+    try:
+        from webview.platforms.winforms import BrowserView
+        form = BrowserView.instances.get(w.uid)
+        if form is not None:
+            return bool(form.is_fullscreen)
+    except Exception:
+        pass
+    return bool(getattr(w, "fullscreen", False))
 
 
 def main(argv: list[str]) -> int:
