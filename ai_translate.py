@@ -166,6 +166,7 @@ Translate in the spirit of 信达雅: faithful to the meaning (信), natural and
 - Keep names and brands as they are commonly written in Chinese; leave pure vocal sounds (oh, yeah, la la) as short sounds or leave them as they are.
 - A word repeated as an echo or backing vocal ("dead, dead, dead") is translated once or as a natural phrase, never as one Chinese character over and over (not 死死死死).
 - Where human translations of nearby lines are given, match their wording and tone.
+- Japanese lines are translated in full, including lines written mostly or only in kanji: they are Japanese, not Chinese, so give natural Chinese for their meaning, never the kanji copied back.
 - Do not censor or soften explicit language; translate it faithfully."""
 
 _SCHEMA = {
@@ -304,12 +305,12 @@ _JSON_RULE = ('\n\nReply with JSON only, in this shape: {"lines": [{"n": <line n
 
 
 # ---- free machine translation ---------------------------------------------------------
-def _google(texts: list[str]) -> list[str] | None:
+def _google(texts: list[str], source: str = "auto") -> list[str] | None:
     """All lines in one request (one per line back), or None if Google won't answer."""
     import requests
     try:
         r = requests.post("https://translate.googleapis.com/translate_a/single", timeout=10,
-                          params={"client": "gtx", "sl": "auto", "tl": "zh-CN", "dt": "t"},
+                          params={"client": "gtx", "sl": source, "tl": "zh-CN", "dt": "t"},
                           data={"q": "\n".join(texts)})
         if r.status_code != 200:
             return None
@@ -319,11 +320,12 @@ def _google(texts: list[str]) -> list[str] | None:
     return [t.strip() for t in out] if len(out) == len(texts) else None
 
 
-def _mymemory(text: str) -> str | None:
+def _mymemory(text: str, japanese: bool = False) -> str | None:
     import requests
+    pair = "en|zh-CN" if text.isascii() else ("ja|zh-CN" if japanese else "autodetect|zh-CN")
     try:
         r = requests.get("https://api.mymemory.translated.net/get", timeout=10,
-                         params={"q": text[:480], "langpair": "en|zh-CN" if text.isascii() else "autodetect|zh-CN"})
+                         params={"q": text[:480], "langpair": pair})
         d = r.json()
         if d.get("quotaFinished") or str(d.get("responseStatus")) != "200":
             return None
@@ -332,13 +334,27 @@ def _mymemory(text: str) -> str | None:
         return None
 
 
-def _machine(texts: list[str]) -> list[str | None]:
-    got = _google(texts)
-    if got is not None:
-        return got
+def _machine(texts: list[str], japanese: bool = False) -> list[str | None]:
+    if japanese:
+        # Japanese song: its non-Latin lines go as Japanese, any English lines as they are.
+        ja = [i for i, t in enumerate(texts) if not t.isascii()]
+        rest = [i for i, t in enumerate(texts) if t.isascii()]
+        got_ja = _google([texts[i] for i in ja], "ja") if ja else []
+        got_rest = _google([texts[i] for i in rest]) if rest else []
+        if got_ja is not None and got_rest is not None:
+            out = [None] * len(texts)
+            for i, t in zip(ja, got_ja):
+                out[i] = t
+            for i, t in zip(rest, got_rest):
+                out[i] = t
+            return out
+    else:
+        got = _google(texts)
+        if got is not None:
+            return got
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(4) as pool:          # MyMemory takes one line per request
-        return list(pool.map(_mymemory, texts))
+        return list(pool.map(lambda t: _mymemory(t, japanese), texts))
 
 
 def translate(title: str, artist: str, texts: list[str], human: list[str | None],
@@ -352,14 +368,15 @@ def translate(title: str, artist: str, texts: list[str], human: list[str | None]
     if not todo:
         return out
 
+    japanese = has_kana(texts)
     if provider == "machine":
-        res = _machine([texts[i] for i in todo])
+        res = _machine([texts[i] for i in todo], japanese)
         got = {i: tidy(zh.strip()) for i, zh in zip(todo, res) if zh and zh.strip() and zh.strip() != texts[i].strip()}
         if not got:
             raise RuntimeError("the free translation services didn't answer (try again later)")
         _log(title, artist, "machine", len(got), 0, 0)
     else:
-        lyric = [i for i, t in enumerate(texts) if worth_translating(t)]
+        lyric = sorted(set(i for i, t in enumerate(texts) if worth_translating(t, japanese)) | set(todo))
         song = "\n".join(
             f"{i}. {texts[i]}" + (f"    [human translation: {human[i]}]" if human[i] else "")
             for i in lyric)

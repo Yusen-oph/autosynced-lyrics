@@ -103,12 +103,17 @@ class _Api:
         # pywebview never updates window.fullscreen after toggle_fullscreen(), so ask the
         # native window itself; trusting the stale flag made Exit a no-op and the next
         # "full screen" toggle back to a normal window (title bar showing).
+        if not on:
+            # Frame drawing back on BEFORE the title bar returns: with it off, Windows
+            # draws the old classic title bar for a moment.
+            _square_edges(False)
         if bool(on) != _is_full(w):
             w.toggle_fullscreen()
             w.fullscreen = bool(on)
-        _square_edges(bool(on))
-        import threading
-        threading.Timer(0.3, _square_edges, (bool(on),)).start()   # again once Windows settles
+        if on:
+            _square_edges(True)
+            import threading
+            threading.Timer(0.3, _square_edges, (True,)).start()   # again once Windows settles
         return _is_full(w)
 
 
