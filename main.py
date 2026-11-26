@@ -189,6 +189,9 @@ class App:
         elif self._ai_wanted() and self.lyrics and (
                 not self.lyrics.ai_checked or self.lyrics.ai_provider != self.settings["ai_provider"]):
             self.track_key = None            # reload to fill missing lines with AI translation
+        elif self.lyrics and self.lyrics.ai_lines and (
+                not self._ai_wanted() or self.lyrics.ai_provider != self.settings["ai_provider"]):
+            self.track_key = None            # AI off / another service: its lines go
         self.overlay.apply()
 
     def _wants_extras(self) -> bool:

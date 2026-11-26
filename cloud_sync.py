@@ -75,15 +75,13 @@ def _signature():
     return (stamp(cache.FILE), stamp(ai_translate.STORE_FILE), tuple(mine))
 
 
-def _ai_lines(title: str, artist: str) -> dict[str, str]:
-    """AI / machine translations already made for this song (Claude's first)."""
-    out = {}
-    for p in reversed(list(ai_translate.PROVIDERS)):
-        out.update(ai_translate.known(title, artist, p))
-    return out
+def _ai_lines(title: str, artist: str, provider: str | None) -> dict[str, str]:
+    """Translations the chosen service (Settings > Translated by) already made for this
+    song; none when AI translation is off. Each service's are kept apart, as on the PC."""
+    return ai_translate.known(title, artist, provider) if provider else {}
 
 
-def build() -> bytes:
+def build(provider: str | None = None) -> bytes:
     songs, seen = [], set()
     for s in lyrics_api.list_user():                       # your own lyrics
         f = lyrics_api.USER_DIR / s["file"]
@@ -103,7 +101,7 @@ def build() -> bytes:
         if key in seen or not d.get("lines"):
             continue
         title, artist = key
-        ai = _ai_lines(title, artist)
+        ai = _ai_lines(title, artist, provider)
         tr = d.get("tr") or []
         lines = []
         for i, (t, w) in enumerate(d["lines"]):
@@ -151,10 +149,11 @@ def upload(settings: dict, force: bool = False) -> str:
         if not (url and user and pw):
             status = "Enter the WebDAV address, user name and password."
             return status
-        sig = _signature()
+        sig = (_signature(), settings.get("ai_translate"), settings.get("ai_provider"))
         if not force and sig == _last_sig:
             return status
-        body = build()
+        provider = settings.get("ai_provider", "claude") if settings.get("ai_translate") else None
+        body = build(provider)
         folder, target = _target(url)
         auth = (user, pw)
         try:
