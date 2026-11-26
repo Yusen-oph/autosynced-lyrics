@@ -15,6 +15,8 @@ android/.kotlin/
 android/build/
 android/app/build/
 android/.idea/
+android/
+build.log
 
 # personal data, never committed (it lives in %APPDATA%\AutosyncedLyrics anyway)
 *.lrc
