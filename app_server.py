@@ -199,7 +199,7 @@ class AppServer:
         lyr = app.lyrics if t is not None and app.track_key == t.key else None
         if lyr is None:
             return {"rev": "", "synced": False, "lines": [], "status": app.status if t else ""}
-        tr_on = app.settings["show_translation"]
+        tr_on = app.settings["show_translation"] or bool(q.get("all"))     # the editor wants them all
         shown = lyr.shown_times()            # music-break lines wait for the last word to end
         return {
             "rev": self._lyrics_rev(lyr), "synced": lyr.synced, "status": app.status,

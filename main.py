@@ -370,6 +370,8 @@ class App:
             lyrics_api.apply_extras(extra, extras.result())
         except Exception:
             pass
+        for i, t in result.own_tr.items():          # your own translations win
+            extra.translations[i] = t
         result.translations, result.char_times = extra.translations, extra.char_times
         result.extras_loaded = True
         if self.settings["cache_lyrics"]:

@@ -97,7 +97,7 @@ def build() -> bytes:
         m = re.search(r"^\[length:\s*(\d+):(\d+)", text, re.M | re.I)
         songs.append({"ti": s["title"], "ar": s["artist"], "d": int(m[1]) * 60 + int(m[2]) if m else 0,
                       "mine": True, "synced": lyr.synced,
-                      "lines": [[round(t * 1000), w, None, 0] for t, w in lyr.lines]})
+                      "lines": [[round(t * 1000), w, lyr.translations[i], 0] for i, (t, w) in enumerate(lyr.lines)]})
         seen.add((s["title"].strip().lower(), s["artist"].strip().lower()))
     for key, d, dur in _cached():                           # lyrics found online
         if key in seen or not d.get("lines"):

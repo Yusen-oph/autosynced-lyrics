@@ -6,9 +6,10 @@ const ED_STAMP = /^\s*((?:\[\d+:\d+(?:\.\d+)?\])+)\s*/;
 const ED_ONE = /\[(\d+):(\d+(?:\.\d+)?)\]/;
 const ED_TAG = /^\s*\[(ti|ar|al|length|by|offset|re|ve):.*\]\s*$/i;
 const ED_UNSURE = /\[([^\[\]]+)\?\]/g;
+const ED_TR = /^\s*\[tr:(.*)\]\s*$/i;      // your translation of the line above
 
 const ed = {
-  lines: [],            // [{ t: seconds | null, text, guess }]
+  lines: [],            // [{ t: seconds | null, text, guess, tr }]
   sel: null,            // selected line
   picked: new Set(),    // lines picked to move together (Shift-click a range, Ctrl-click one)
   syncing: false,
@@ -25,14 +26,20 @@ const stamp = s => {
 };
 
 function edParse(text) {
-  return String(text || "").replace(/\r/g, "").split("\n").filter(l => !ED_TAG.test(l)).map(l => {
+  const out = [];
+  for (const l of String(text || "").replace(/\r/g, "").split("\n")) {
+    const tr = l.match(ED_TR);
+    if (tr) { if (out.length) out[out.length - 1].tr = tr[1].trim(); continue; }
+    if (ED_TAG.test(l)) continue;
     const m = l.match(ED_STAMP);
-    if (!m) return { t: null, text: l.trim(), guess: false };
+    if (!m) { out.push({ t: null, text: l.trim(), guess: false, tr: "" }); continue; }
     const one = m[1].match(ED_ONE);
-    return { t: +one[1] * 60 + parseFloat(one[2]), text: l.slice(m[0].length).trim(), guess: false };
-  });
+    out.push({ t: +one[1] * 60 + parseFloat(one[2]), text: l.slice(m[0].length).trim(), guess: false, tr: "" });
+  }
+  return out;
 }
-const edSerialize = () => ed.lines.map(l => (l.t != null ? stamp(l.t) : "") + l.text).join("\n");
+const edSerialize = () => ed.lines.map(l => (l.t != null ? stamp(l.t) : "") + l.text +
+  (l.tr && l.tr.trim() && l.text.trim() ? `\n[tr:${l.tr.trim().replace(/[\r\n\]]/g, " ")}]` : "")).join("\n");
 const edSong = () => ({ title: $("#edTitle").value.trim(), artist: $("#edArtist").value.trim() });
 const edStatus = text => { const el = $("#edStatus"); el.textContent = text || ""; el.title = text || ""; };
 const isLyric = i => ed.lines[i] && ed.lines[i].text.trim() !== "";
@@ -62,7 +69,8 @@ function edMakeRow(l, i) {
   const row = document.createElement("div");
   row.className = edRowClass(l, i);
   row.dataset.i = i;
-  const words = l.text ? esc(l.text).replace(ED_UNSURE, '<span class="unsure">[$1?]</span>') : "(empty line)";
+  const words = (l.text ? esc(l.text).replace(ED_UNSURE, '<span class="unsure">[$1?]</span>') : "(empty line)") +
+    (l.text ? `<span class="ed-tr${l.tr ? "" : " none"}" title="Double-click to edit the translation">${l.tr ? esc(l.tr) : "+ translation"}</span>` : "");
   row.innerHTML = `<span class="num">${i + 1}</span>
     <span class="time" title="Click to set this line's time to now">${edTimeText(l)}</span>
     <span class="words">${words}</span>
@@ -185,21 +193,26 @@ $("#edLines").addEventListener("click", e => {
 });
 $("#edLines").addEventListener("dblclick", e => {
   const row = e.target.closest(".ed-line");
-  if (row && !ed.syncing && e.target.closest(".words")) edEditLine(+row.dataset.i);
+  if (!row || ed.syncing) return;
+  if (e.target.closest(".ed-tr")) edEditLine(+row.dataset.i, "tr");
+  else if (e.target.closest(".words")) edEditLine(+row.dataset.i);
 });
 
-function edEditLine(i) {
+// Edit a line's words, or (field "tr") its translation, in place.
+function edEditLine(i, field = "text") {
   const row = $(`.ed-line[data-i="${i}"]`);
   if (!row) return;
-  const cell = $(".words", row);
+  const cell = field === "tr" ? $(".ed-tr", row) : $(".words", row);
+  if (!cell) return;
   const inp = document.createElement("input");
-  inp.type = "text"; inp.value = ed.lines[i].text;
+  inp.type = "text"; inp.value = ed.lines[i][field] || "";
+  if (field === "tr") { inp.placeholder = "Translation (empty = use the one found online)"; cell.classList.remove("none"); }
   cell.innerHTML = ""; cell.appendChild(inp);
   inp.focus(); inp.select();
   let done = false;
   const finish = keep => {
     if (done) return; done = true;
-    if (keep) ed.lines[i].text = inp.value.trim();
+    if (keep) ed.lines[i][field] = inp.value.trim();
     edRender();
   };
   inp.addEventListener("keydown", e => {
@@ -332,7 +345,7 @@ async function edLoad() {
   if (!s.title) return;
   try {
     const r = await api(`editor/load?title=${encodeURIComponent(s.title)}&artist=${encodeURIComponent(s.artist)}`);
-    if (r.saved) { edSetText(r.text); edStatus("Loaded your saved version."); }
+    if (r.saved) { edSetText(r.text); edStatus("Loaded your saved version."); edFillTranslations(); }
     else { edSetText(""); edSearch(); }
   } catch (e) { edStatus(e.message); }
 }
@@ -347,9 +360,24 @@ async function edSearch() {
   const hasText = ed.lines.some(l => l.text.trim());
   if (hasText && !(await confirmBox("Replace the lyrics?", "Replace what's in the editor with the lyrics found online?", "Replace"))) return;
   edSetText(r.text);
+  edFillTranslations();
   edStatus(`Found ${r.synced ? "synced" : "untimed"} lyrics (${r.source}): ${r.track} — ${r.artist}. ` +
            (r.synced ? "Check them, adjust, then Save." : "Play the song and use tap-sync."));
 }
+// The translations the app shows for the song playing (from lyrics sites or AI), copied
+// onto the editor's lines with the same words, so they can be checked and edited.
+async function edFillTranslations() {
+  const s = edSong();
+  if (!now.open || !s.title || s.title !== now.title) return;
+  let r;
+  try { r = await api("lyrics?all=1"); } catch (e) { return; }
+  const byText = new Map();
+  for (const l of r.lines || []) if (l.tr && !byText.has(l.text.trim())) byText.set(l.text.trim(), l.tr);
+  let n = 0;
+  for (const l of ed.lines) if (!l.tr && byText.has(l.text.trim())) { l.tr = byText.get(l.text.trim()); n++; }
+  if (n) { if (ed.raw) $("#edRaw").value = edSerialize(); edRender(); }
+}
+
 function edUseCurrent() {
   if (!now.open) return toast("Nothing is playing");
   $("#edTitle").value = now.title; $("#edArtist").value = now.artist;

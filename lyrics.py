@@ -32,6 +32,7 @@ class Lyrics:
         self.ai_lines: set[int] = set()   # translations written by Claude (see ai_translate)
         self.ai_checked = False
         self.ai_provider = None             # who wrote ai_lines
+        self.own_tr: dict[int, str] = {}    # your own translations (editor), never replaced
         # Fixing lyrics timed for another version of the song, by listening (see retime()):
         self.heard_starts: dict[int, float] = {}   # line index -> when it was actually sung
         self.heard_lines: set[int] = set()         # lines whose word timing came from listening
@@ -612,6 +613,8 @@ def _lrclib(title: str, artist: str, album: str, duration: float) -> dict | None
 # ---- your own lyrics (made in the editor), stored as standard .lrc files ----
 USER_DIR = paths.MY_LYRICS_DIR
 _TAG = re.compile(r"^\[(ti|ar|al|length|by|offset|re|ve):.*\]\s*$", re.I)
+# Your own translation of a line: "[tr:...]" on the line right after it (other players skip it).
+_TR = re.compile(r"^\s*\[tr:(.*)\]\s*$", re.I)
 
 
 def _safe(s: str) -> str:
@@ -622,12 +625,45 @@ def user_file(title: str, artist: str) -> Path:
     return USER_DIR / f"{_safe(artist)} - {_safe(title)}.lrc"
 
 
+def own_translations(text: str) -> tuple[dict[float, str], list[str | None]]:
+    """Your translations from "[tr:...]" lines: by the time of the line above it (synced
+    lyrics), and in order of the lines (untimed lyrics)."""
+    by_time, in_order = {}, []
+    last_time = None
+    for raw in text.splitlines():
+        m = _TR.match(raw)
+        if m:
+            if in_order:
+                in_order[-1] = m.group(1).strip() or None
+                if last_time is not None and in_order[-1]:
+                    by_time[round(last_time, 2)] = in_order[-1]
+            continue
+        if not raw.strip() or _TAG.match(raw):
+            continue
+        stamps = _TIMESTAMP.findall(raw)
+        last_time = int(stamps[0][0]) * 60 + float(stamps[0][1]) if stamps else None
+        in_order.append(None)
+    return by_time, in_order
+
+
 def from_text(text: str) -> Lyrics | None:
+    by_time, in_order = own_translations(text)
     synced = parse_lrc(text)
     if synced:
-        return Lyrics(synced, synced=True)
-    plain = [l for l in text.splitlines() if l.strip() and not _TAG.match(l)]
-    return Lyrics([(0.0, l) for l in plain], synced=False) if plain else None
+        lyr = Lyrics(synced, synced=True)
+        m = re.search(r"^\[offset:\s*([+-]?\d+)\s*\]", text, re.M | re.I)
+        shift = int(m.group(1)) / 1000 if m else 0.0
+        own = {i: by_time.get(round(t + shift, 2)) for i, (t, _) in enumerate(synced)}
+    else:
+        plain = [l for l in text.splitlines() if l.strip() and not _TAG.match(l) and not _TR.match(l)]
+        if not plain:
+            return None
+        lyr = Lyrics([(0.0, l) for l in plain], synced=False)
+        own = dict(enumerate(in_order))
+    lyr.own_tr = {i: t for i, t in own.items() if t and i < len(lyr.lines)}
+    for i, t in lyr.own_tr.items():
+        lyr.translations[i] = t
+    return lyr
 
 
 def strip_tags(text: str) -> str:

@@ -595,6 +595,10 @@ body[data-theme="night"] .ed-line.done .time { color: var(--accent); }
 .ed-line .words { font-size: 15px; line-height: 1.4; white-space: pre-wrap; word-break: break-word; }
 .ed-line.blank .words { color: var(--faint); font-style: italic; }
 .ed-line .words input { width: 100%; font: inherit; padding: 3px 6px; }
+.ed-tr { display: block; font-size: 13px; color: var(--sub); margin-top: 1px; font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif; }
+.ed-tr.none { color: var(--faint); opacity: 0; transition: opacity .12s; }
+.ed-line:hover .ed-tr.none, .ed-line.sel .ed-tr.none { opacity: 1; }
+.ed-tr input { font-size: 13px !important; }
 .ed-line.sel { background: var(--hover); box-shadow: inset 3px 0 0 var(--sub); }
 .ed-line.picked { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
 .ed-line.picked.sel { box-shadow: inset 3px 0 0 var(--accent), inset 0 0 0 1px var(--accent); }
