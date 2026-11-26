@@ -191,7 +191,19 @@
     <header class="page-head">
       <div><div class="eyebrow">AI translation</div><h1>AI Usage</h1>
       <p class="sub">Every AI translation request, with what it cost. Each line is translated once; replays are free.</p></div>
-      <button class="btn ghost" id="usageRefresh">Refresh</button>
+      <div class="usage-tools">
+        <label class="usage-sort">Sort by
+          <select id="usageSort">
+            <option value="new">Newest first</option>
+            <option value="old">Oldest first</option>
+            <option value="song">Song (A–Z)</option>
+            <option value="artist">Artist / singer (A–Z)</option>
+            <option value="cost">Cost (highest first)</option>
+            <option value="lines">Lines (most first)</option>
+            <option value="model">Model</option>
+          </select></label>
+        <button class="btn ghost" id="usageRefresh">Refresh</button>
+      </div>
     </header>
     <div class="stats">
       <div class="stat"><div class="stat-label">This month</div><div class="stat-value" id="stMonth">$0</div><div class="stat-sub" id="stMonthSongs"></div></div>

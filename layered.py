@@ -110,10 +110,18 @@ class LayeredWindow:
             gdi32.DeleteDC(self._mem)
         self._mem = self._bmp = self._old = self._bits = self._size = None
 
-    def update(self, img: Image.Image, x: int, y: int, opacity: float = 1.0) -> bool:
+    def set_opacity(self, opacity: float) -> bool:
+        """Change only the whole window's opacity (no new picture): nearly free."""
+        blend = BLENDFUNCTION(AC_SRC_OVER, 0, max(0, min(255, round(opacity * 255))), AC_SRC_ALPHA)
+        return bool(user32.UpdateLayeredWindow(self.hwnd, None, None, None, None, None, 0,
+                                               ctypes.byref(blend), ULW_ALPHA))
+
+    def update(self, img: Image.Image, x: int, y: int, opacity: float = 1.0, data: bytes = None) -> bool:
+        """data: img already turned into premultiplied BGRA (e.g. on another thread)."""
         w, h = img.size
         self._ensure_buffer(w, h)
-        data = img.tobytes("raw", "BGRa")  # premultiplied BGRA in one pass, as Windows wants
+        if data is None:
+            data = img.tobytes("raw", "BGRa")  # premultiplied BGRA in one pass, as Windows wants
         ctypes.memmove(self._bits, data, len(data))
         screen = user32.GetDC(None)
         try:

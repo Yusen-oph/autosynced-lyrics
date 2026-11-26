@@ -52,6 +52,12 @@ DEFAULTS = {
     "cloud_sync": False,
     "webdav_url": "",
     "webdav_user": "",       # who fills them: claude / deepseek / qwen (your key) or machine (free)
+    # wallpaper lyrics: big lyrics on the desktop, over the wallpaper, under every window
+    "wall_lyrics": False,
+    "wall_position": "left",       # left, center, right
+    "wall_size": 30,               # pt, the line being sung
+    "wall_lines": 5,               # lines shown (the one being sung in the middle)
+    "wall_opacity": 0.9,
     # animation
     "animation": "slide",
     "animation_ms": 350,

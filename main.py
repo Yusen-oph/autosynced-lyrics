@@ -38,6 +38,7 @@ import tray
 import updater
 from lyrics_editor import LyricsEditor
 from overlay import AI_MARK, Overlay, View
+from wallpaper import WallpaperLyrics
 from settings_window import SettingsWindow
 from media_watcher import MediaWatcher
 
@@ -97,6 +98,7 @@ class App:
 
         self.overlay = Overlay(self.root, self.settings, on_moved=self._moved, on_menu=self._menu,
                                on_control=self._control)
+        self.wallpaper = WallpaperLyrics(self.root, self.settings)
         self.settings_win: SettingsWindow | None = None
         self.editor: LyricsEditor | None = None
         self.hidden_by_user = False
@@ -193,6 +195,7 @@ class App:
                 not self._ai_wanted() or self.lyrics.ai_provider != self.settings["ai_provider"]):
             self.track_key = None            # AI off / another service: its lines go
         self.overlay.apply()
+        self.wallpaper.apply()
 
     def _wants_extras(self) -> bool:
         return self.settings["show_translation"] or self.settings["bouncing_note"]
@@ -230,6 +233,9 @@ class App:
         if self._colors_for != (cover[0], light):
             self._colors_for = (cover[0], light)
             self.overlay.set_colors(palette.from_cover(cover[1], light) if cover[1] else None)
+            # the wallpaper words are light (on a dark shadow) whatever the style: bright colours
+            self.wallpaper.set_colors(self.overlay.colors if not light else
+                                      palette.from_cover(cover[1], False) if cover[1] else None)
 
     _colors_for = None
 
@@ -429,6 +435,7 @@ class App:
             self.track_key, self.lyrics = None, None
             self.overlay.set_view(View(cur=self._waiting_text()))
             self.overlay.set_progress(None, 0)
+            self.wallpaper.hide()
         else:
             self.overlay.set_progress(track.current_position, track.duration, track.playing)
             if not self.settings["album_colors"]:
@@ -446,7 +453,7 @@ class App:
 
         # While animating: ask Windows for 1 ms timer precision (default ~15.6 ms makes
         # 16 ms waits jitter up to 31 ms) and subtract drawing time from the wait.
-        animating = self.overlay.busy()
+        animating = self.overlay.busy() or self.wallpaper.busy()
         if animating != self._hires_timer:
             try:
                 (_winmm.timeBeginPeriod if animating else _winmm.timeEndPeriod)(1)
@@ -527,6 +534,7 @@ class App:
         header = f"{track.title} — {track.artist}"
         song = track.key
         lyr = self.lyrics
+        self._render_wallpaper(track, lyr, header, song)
         if lyr is None:
             self.overlay.set_view(View(header, "", self.status or "♪", "", None, song))
         elif not lyr.synced:
@@ -546,6 +554,19 @@ class App:
                 self.overlay.set_view(View(header, line(i - 1), line(i), line(i + 1), i, song,
                                            tr(i - 1), tr(i), tr(i + 1), tr_on))
             self._update_note(lyr, i, song, pos)
+
+    _wall_lines = (None, None)
+
+    def _render_wallpaper(self, track, lyr, header, song):
+        """Wallpaper lyrics: only for synced lyrics (nothing to show for the others)."""
+        if not self.settings["wall_lyrics"] or lyr is None or not lyr.synced:
+            return self.wallpaper.hide()
+        if self._wall_lines[0] is not lyr or len(self._wall_lines[1]) != len(lyr.lines) \
+                or any(a[1] != (b or "") for a, b in zip(self._wall_lines[1], lyr.translations)):
+            self._wall_lines = (lyr, [(text, tr or "") for (_, text), tr in zip(lyr.lines, lyr.translations)])
+        fix = self.settings["offset"] + song_offsets.get(track.title, track.artist)
+        i = lyr.index_at(track.current_position() + fix)
+        self.wallpaper.update(song, self._wall_lines[1], i, header)
 
     _note_line = None
 

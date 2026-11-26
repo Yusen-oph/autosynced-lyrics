@@ -21,6 +21,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import ai_translate
+import wallpaper
 import cloud_sync
 import cache
 import config
@@ -41,6 +42,7 @@ ALLOWED = {   # text settings that only take these values
     "cover_shape": ("square", "rounded", "circle", "vinyl", "cd", "polaroid"),
     "cover_motion": ("still", "spin", "float", "sway", "pulse", "tilt"),
     "ai_provider": tuple(ai_translate.PROVIDERS),
+    "wall_position": tuple(wallpaper.POSITIONS.values()),
 }
 
 
@@ -192,7 +194,7 @@ class AppServer:
         if lyr is None:
             return ""
         return (f"{id(lyr)}:{sum(1 for x in lyr.translations if x)}:{len(lyr.ai_lines)}:"
-                f"{sum(1 for c in lyr.char_times if c)}")
+                f"{sum(1 for c in lyr.char_times if c)}:{getattr(lyr, 'tr_edits', 0)}")
 
     def _get_lyrics(self, q):
         app, t = self.app, self.app.watcher.track
@@ -246,6 +248,7 @@ class AppServer:
                 "animation": [[label, value] for label, value in ANIMATIONS.items()],
                 "player": [[label, value] for label, value in PLAYER_CHOICES.items()],
                 "ai_provider": [[name, p] for p, (name, *_) in ai_translate.PROVIDERS.items()],
+                "wall_position": [[label, v] for label, v in wallpaper.POSITIONS.items()],
             },
             "startup": config.startup_enabled(),
             "cache": {"count": cache.count(), "kb": round(cache.size() / 1024)},
@@ -321,6 +324,22 @@ class AppServer:
     def _post_cache_clear(self, b):
         cache.clear()
         return {"count": 0, "kb": 0}
+
+    def _post_translation(self, b):
+        """Now Playing: you fixed an AI / machine translation of the song playing."""
+        app, t = self.app, self.app.watcher.track
+        lyr = app.lyrics if t is not None and app.track_key == t.key else None
+        i = int(b.get("i", -1))
+        if lyr is None or not 0 <= i < len(lyr.lines) or i not in lyr.ai_lines:
+            raise ValueError("That line has no AI translation to edit")
+        zh = " ".join(str(b.get("tr", "")).split())[:300]
+        ai_translate.correct(t.title, t.artist, lyr.lines[i][1], zh, lyr.ai_provider or app.settings["ai_provider"])
+        if zh:
+            lyr.translations[i] = zh
+        lyr.tr_edits = getattr(lyr, "tr_edits", 0) + 1
+        if not zh:                           # empty: translated again
+            app.track_key = None
+        return {"tr": zh}
 
     def _post_ai_key(self, b):
         provider = str(b.get("provider", "claude"))

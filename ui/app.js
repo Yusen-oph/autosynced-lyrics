@@ -353,8 +353,9 @@ function renderLyrics() {
     d.className = "line";
     d.dataset.i = i;
     d.innerHTML = `<div>${esc(l.text || "♪")}</div>` +
-      (l.tr ? `<div class="tr"><span>${esc(l.tr)}</span>${l.ai ? '<span class="ai-tag" title="Not from a lyrics site: translated by AI or machine translation">AI</span>' : ""}</div>` : "");
-    if (lyr.synced) d.addEventListener("click", () => seekTo(l.t, true));
+      (l.tr ? `<div class="tr"><span>${esc(l.tr)}</span>${l.ai ? '<span class="ai-tag" title="Not from a lyrics site: translated by AI or machine translation. Double-click to fix it.">AI</span>' : ""}</div>` : "");
+    if (lyr.synced) d.addEventListener("click", e => { if (!e.target.closest(".tr input")) seekTo(l.t, true); });
+    if (l.ai) d.addEventListener("dblclick", e => { if (e.target.closest(".tr")) editAiTranslation(i, d); });
     frag.appendChild(d);
   });
   box.appendChild(frag);
@@ -366,6 +367,37 @@ function renderLyrics() {
     box.prepend(note);
   }
   tick(true);
+}
+
+// Double-click an AI translation to fix it; Enter saves (kept for this song from now on),
+// Esc cancels, empty = have it translated again.
+function editAiTranslation(i, row) {
+  const cell = $(".tr", row);
+  if (!cell || $("input", cell)) return;
+  const inp = document.createElement("input");
+  inp.type = "text"; inp.className = "tr-edit"; inp.value = lyr.lines[i].tr || "";
+  inp.placeholder = "Empty = translate again";
+  cell.innerHTML = ""; cell.appendChild(inp);
+  inp.focus(); inp.select();
+  let done = false;
+  const finish = async keep => {
+    if (done) return; done = true;
+    const v = inp.value.trim();
+    if (keep && v !== (lyr.lines[i].tr || "")) {
+      try {
+        await api("translation", { i, tr: v });
+        if (v) lyr.lines[i].tr = v;
+        toast(v ? "Translation saved" : "Translating that line again…");
+      } catch (e) { toast("Couldn't save the translation"); }
+    }
+    renderLyrics();
+  };
+  inp.addEventListener("keydown", e => {
+    e.stopPropagation();                      // not F11 / Esc for full screen, not shortcuts
+    if (e.key === "Enter") finish(true);
+    else if (e.key === "Escape") finish(false);
+  });
+  inp.addEventListener("blur", () => finish(true));
 }
 
 function lineAt(t) {
@@ -524,6 +556,13 @@ const SECTIONS = [
     { type: "toggle", key: "show_next", label: "Show the next line" },
     { type: "number", key: "other_size", label: "Previous / next size", min: 6, max: 72, step: 1 },
     { type: "color", key: "other_color", label: "Previous / next colour", own: true },
+  ]},
+  { title: "Wallpaper lyrics", items: [
+    { type: "toggle", key: "wall_lyrics", label: "Big lyrics on the desktop", hint: "Over your wallpaper (also Wallpaper Engine's) and under every window, like QQ Music's wallpaper lyrics. Clicks pass through to your desktop icons." },
+    { type: "select", key: "wall_position", label: "Where", choices: "wall_position" },
+    { type: "number", key: "wall_size", label: "Size of the line being sung", min: 14, max: 96, step: 1 },
+    { type: "number", key: "wall_lines", label: "Lines shown", min: 1, max: 11, step: 2 },
+    { type: "range", key: "wall_opacity", label: "Opacity", min: .2, max: 1, step: .05, pct: true },
   ]},
   { title: "Chinese translation", items: [
     { type: "toggle", key: "show_translation", label: "Show the Chinese translation under each line" },
@@ -934,10 +973,38 @@ async function loadUsage() {
   $("#stAll").textContent = money(u.all.cost);
   $("#stAllSongs").textContent = `${u.all.songs} request${u.all.songs === 1 ? "" : "s"}`;
   $("#stLines").textContent = u.all.lines.toLocaleString();
+  usageRows = u.rows;
+  renderUsageRows();
+}
+
+// The table in the order picked (remembered); sorting needs no new request.
+let usageRows = [];
+// A–Z names first, then Chinese by pinyin, then Japanese kana.
+const zhOrder = new Intl.Collator("zh-CN", { sensitivity: "base", numeric: true }).compare;
+const latinFirst = s => /^[^\p{L}\p{N}]*[A-Za-z0-9]/u.test(s) ? 0 : 1;
+const byLetters = (a, b) => latinFirst(a) - latinFirst(b) || zhOrder(a, b);
+const USAGE_ORDER = {
+  new: (a, b) => b.time.localeCompare(a.time),
+  old: (a, b) => a.time.localeCompare(b.time),
+  song: (a, b) => byLetters(a.title || "", b.title || "") || byLetters(a.artist || "", b.artist || ""),
+  artist: (a, b) => byLetters(a.artist || "", b.artist || "") || byLetters(a.title || "", b.title || ""),
+  cost: (a, b) => b.cost - a.cost,
+  lines: (a, b) => b.lines - a.lines,
+  model: (a, b) => byLetters(a.model_name || "", b.model_name || ""),
+};
+try { const s = localStorage.getItem("usageSort"); if (USAGE_ORDER[s]) $("#usageSort").value = s; } catch (e) {}
+$("#usageSort").onchange = () => {
+  try { localStorage.setItem("usageSort", $("#usageSort").value); } catch (e) {}
+  renderUsageRows();
+};
+function renderUsageRows() {
+  const order = USAGE_ORDER[$("#usageSort").value] || USAGE_ORDER.new;
+  // stable sort over newest-first rows: ties (same song, cost...) stay newest first
+  const rows = usageRows.slice().sort((a, b) => order(a, b) || b.time.localeCompare(a.time));
   const tb = $("#usageTable tbody");
   tb.innerHTML = "";
-  $("#usageEmpty").hidden = u.rows.length > 0;
-  for (const e of u.rows) {
+  $("#usageEmpty").hidden = rows.length > 0;
+  for (const e of rows) {
     const tr = document.createElement("tr");
     tr.innerHTML = `<td class="muted">${esc(e.time)}</td><td class="title">${esc(e.title)} <span class="muted">— ${esc(e.artist)}</span></td>
       <td>${esc(e.model_name)}</td><td class="num">${e.lines}</td>

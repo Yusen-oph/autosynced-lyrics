@@ -170,6 +170,11 @@ body[data-theme="day"] .cover.big { border-radius: 12px; }
 #page-now { padding: 0; overflow: hidden; }
 
 /* ---- full screen Now Playing: just the cover and the lyrics, bigger ---- */
+.tr-edit { font: inherit; color: inherit; background: rgba(128,128,128,.18); border: 1px solid var(--accent);
+  border-radius: 6px; padding: 2px 8px; width: min(100%, 36em); outline: none; user-select: text; }
+.line .ai-tag { cursor: text; }
+.usage-tools { display: flex; align-items: center; gap: 12px; }
+.usage-sort { display: flex; align-items: center; gap: 8px; color: var(--sub); font-size: 13px; font-weight: 600; }
 .full-btn { position: absolute; top: 14px; right: 16px; z-index: 5; width: 36px; height: 36px; border-radius: 50%;
             display: grid; place-items: center; color: var(--sub); background: var(--panel-2); opacity: .7; transition: opacity .2s; }
 .full-btn:hover { opacity: 1; color: var(--text); }

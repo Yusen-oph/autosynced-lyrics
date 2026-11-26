@@ -133,6 +133,21 @@ def _remember(title: str, artist: str, pairs: dict[str, str], provider: str = "c
         os.replace(tmp, STORE_FILE)
 
 
+def correct(title: str, artist: str, line: str, zh: str, provider: str = "claude") -> None:
+    """Your fix of one line this service translated: kept as its translation from now on
+    (and synced to the phone). Empty: forget the line, so it is translated again."""
+    with _lock:
+        data = _load()
+        song = data.setdefault(_song(title, artist, provider), {})
+        if zh:
+            song[line] = zh
+        else:
+            song.pop(line, None)
+        tmp = STORE_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+        os.replace(tmp, STORE_FILE)
+
+
 # ---- usage & cost log --------------------------------------------------------------
 def cost_of(model: str, tokens_in: int, tokens_out: int) -> float:
     p_in, p_out = PRICES.get(model, (0.0, 0.0))
