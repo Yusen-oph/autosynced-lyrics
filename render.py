@@ -37,12 +37,13 @@ class TextStyle:
 
 
 @lru_cache(maxsize=512)
-def text_image(text: str, style: TextStyle, max_w: int) -> Image.Image | None:
-    """Centered, wrapped, outlined text on a transparent background."""
+def text_image(text: str, style: TextStyle, max_w: int, align: str = "center") -> Image.Image | None:
+    """Wrapped, outlined text on a transparent background; a long line's rows centred, or
+    lined up on the left or right (align)."""
     if not text:
         return None
     return colorize(text_masks(text, style.family, style.bold, style.px,
-                               style.outline_px if style.outline else 0, max_w),
+                               style.outline_px if style.outline else 0, max_w, align),
                     style.color, style.outline_color)
 
 
@@ -58,7 +59,8 @@ def colorize(masks, color: str, outline_color: str) -> Image.Image:
 
 
 @lru_cache(maxsize=512)
-def text_masks(text: str, family: str, bold: bool, px: int, stroke: int, max_w: int):
+def text_masks(text: str, family: str, bold: bool, px: int, stroke: int, max_w: int,
+               align: str = "center"):
     """The text's shape (fill mask, outline mask or None), independent of colour."""
     font = fonts.font_for(text, family, bold, px)
     rows = _wrap(text, font, max_w - 2 * stroke - 4)
@@ -74,7 +76,7 @@ def text_masks(text: str, family: str, bold: bool, px: int, stroke: int, max_w: 
     fd, sd = ImageDraw.Draw(fill_mask), ImageDraw.Draw(stroke_mask)
     y = stroke
     for row, rw in zip(rows, widths):
-        x = (w - rw) / 2
+        x = {"left": stroke + 2, "right": w - rw - stroke - 2}.get(align, (w - rw) / 2)
         fd.text((x, y), row, font=font, fill=255)
         if stroke:
             sd.text((x, y), row, font=font, fill=255, stroke_width=stroke, stroke_fill=255)
@@ -247,14 +249,14 @@ def drop_shadow(box: tuple[int, int], radius: int, margins: tuple[int, int, int]
     return out
 
 
-def with_glow(img: Image.Image, radius: int, strength: int) -> Image.Image:
+def with_glow(img: Image.Image, radius: int, strength: int, color=(0, 0, 0)) -> Image.Image:
     """A soft dark glow behind the text (for text floating without a background box).
     Blurred at half size: looks the same, about 4x faster."""
     a = img.getchannel("A")
     small = a.resize((max(1, a.width // 2), max(1, a.height // 2)), Image.BILINEAR)
     small = small.filter(ImageFilter.GaussianBlur(max(1, radius / 2)))
     glow = small.resize(a.size, Image.BILINEAR).point(lambda v: min(255, v * 3) * strength // 255)
-    out = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    out = Image.new("RGBA", img.size, (*color, 0))
     out.putalpha(glow)
     out.alpha_composite(img)
     return out

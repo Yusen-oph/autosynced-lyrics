@@ -91,11 +91,12 @@ class WallpaperLyrics:
 
     def _styles(self):
         s = self.s
-        cur_color = self.colors["cur"] if (self.colors and s["album_colors"]) else "#ffffff"
+        album = self.colors and s["album_colors"] and s["wall_album_colors"]
+        cur_color = self.colors["cur"] if album else s["wall_current_color"]
         big = self._px(s["wall_size"])
         cur = render.TextStyle(s["font_family"], True, big, cur_color, False, "#000000", 0)
-        other = render.TextStyle(s["font_family"], False, max(8, round(big * 0.62)), "#ffffff",
-                                 False, "#000000", 0)
+        other = render.TextStyle(s["font_family"], False, max(8, round(big * 0.62)),
+                                 s["wall_other_color"], False, "#000000", 0)
         return cur, other
 
     # ---- showing -----------------------------------------------------------
@@ -197,11 +198,11 @@ class WallpaperLyrics:
         def block(i):
             text, tr = lines[i]
             st = cur_st if i == idx else other_st
-            img = render.text_image(text or "♪", st, max_w)
+            img = render.text_image(text or "♪", st, max_w, pos)
             if tr_on and tr:
                 tst = render.TextStyle(st.family, False, max(6, round(st.px * tr_pct)), st.color,
                                        False, "#000000", 0)
-                img = _stack(img, render.text_image(tr.lstrip(AI_MARK), tst, max_w),
+                img = _stack(img, render.text_image(tr.lstrip(AI_MARK), tst, max_w, pos),
                              round(render.TR_GAP * self.scale), pos)
             return img
 
@@ -229,9 +230,9 @@ class WallpaperLyrics:
             place.append((img, yy, max(0.15, 0.6 - 0.18 * (k - 1))))
             yy += img.height
         if s["show_header"] and header:
-            hst = render.TextStyle(cur_st.family, False, max(8, round(cur_st.px * 0.42)), "#ffffff",
-                                   False, "#000000", 0)
-            himg = render.text_image(header, hst, max_w)
+            hst = render.TextStyle(cur_st.family, False, max(8, round(cur_st.px * 0.42)),
+                                   s["wall_other_color"], False, "#000000", 0)
+            himg = render.text_image(header, hst, max_w, pos)
             top_y = min(p[1] for p in place)
             place.append((himg, max(pad, top_y - gap * 2 - himg.height), 0.7))
         for img, ty, alpha in place:
@@ -246,7 +247,9 @@ class WallpaperLyrics:
             it = render.Item(img, lx + img.width / 2, ty + img.height / 2, alpha)
             render.draw_items(canvas, [it])
         # A soft dark shadow behind the words, so they read on any wallpaper.
-        canvas = render.with_glow(canvas, max(4, round(cur_st.px * 0.35)), 150)
+        shadow = s["wall_shadow_color"].lstrip("#")
+        canvas = render.with_glow(canvas, max(4, round(cur_st.px * 0.35)), 150,
+                                  tuple(int(shadow[k:k + 2], 16) for k in (0, 2, 4)))
         box = canvas.getbbox()                    # just the words: less to copy to the screen
         if box:
             canvas = canvas.crop(box)

@@ -58,6 +58,10 @@ DEFAULTS = {
     "wall_size": 30,               # pt, the line being sung
     "wall_lines": 5,               # lines shown (the one being sung in the middle)
     "wall_opacity": 0.9,
+    "wall_album_colors": True,     # the line being sung in the album's colour
+    "wall_current_color": "#ffffff",
+    "wall_other_color": "#ffffff",
+    "wall_shadow_color": "#000000",
     # animation
     "animation": "slide",
     "animation_ms": 350,

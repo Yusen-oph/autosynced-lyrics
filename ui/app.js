@@ -574,6 +574,10 @@ const SECTIONS = [
     { type: "number", key: "wall_size", label: "Size of the line being sung", min: 14, max: 96, step: 1 },
     { type: "number", key: "wall_lines", label: "Lines shown", min: 1, max: 11, step: 2 },
     { type: "range", key: "wall_opacity", label: "Opacity", min: .2, max: 1, step: .05, pct: true },
+    { type: "toggle", key: "wall_album_colors", label: "Line being sung in the album's colour", hint: "Turn off to use the colour below" },
+    { type: "color", key: "wall_current_color", label: "Line being sung" },
+    { type: "color", key: "wall_other_color", label: "Other lines and the title" },
+    { type: "color", key: "wall_shadow_color", label: "Shadow behind the words", hint: "Dark for light words; light for dark words" },
   ]},
   { title: "Chinese translation", items: [
     { type: "toggle", key: "show_translation", label: "Show the Chinese translation under each line" },
