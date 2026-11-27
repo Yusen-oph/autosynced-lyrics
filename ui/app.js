@@ -295,7 +295,10 @@ function loadCover(id) {
       probe.src = url;
       updateSurfaces();
     })
-    .catch(() => imgs.forEach(i => i.classList.remove("loaded")));
+    .catch(() => {
+      imgs.forEach(i => i.classList.remove("loaded"));
+      if (coverId === id) coverId = "";              // try again on the next update
+    });
 }
 
 function dominant(img) {         // the cover's most striking colour, for the night lyrics panel

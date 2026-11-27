@@ -230,8 +230,8 @@ class App:
         if cover is None or cover[0] != track.key:
             return
         light = self.settings["bar_follows_style"] and self.settings["ui_style"] == "day"
-        if self._colors_for != (cover[0], light):
-            self._colors_for = (cover[0], light)
+        if self._colors_for != (cover[0], cover[1] is not None, light):
+            self._colors_for = (cover[0], cover[1] is not None, light)
             self.overlay.set_colors(palette.from_cover(cover[1], light) if cover[1] else None)
             # the wallpaper words are light (on a dark shadow) whatever the style: bright colours
             self.wallpaper.set_colors(self.overlay.colors if not light else

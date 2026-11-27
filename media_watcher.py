@@ -32,6 +32,10 @@ def player_of(app_id: str) -> str | None:
     return next((p for p, (_, keys) in PLAYERS.items() if any(k in app_id for k in keys)), None)
 
 
+COVER_LATE_EVERY = 10     # polls (~5 s) between looks for a cover that hasn't come yet
+COVER_LATE_TRIES = 250    # ... for about 2 minutes of the song
+
+
 @dataclass
 class Track:
     title: str
@@ -73,6 +77,7 @@ class MediaWatcher(threading.Thread):
         self.cover = None             # (song key, image bytes or None): the album cover
         self._cover_tries: dict = {}
         self._last_cover = None
+        self._cover_unsure = None     # song whose cover may still be the previous song's
 
     def run(self):
         asyncio.run(self._loop())
@@ -122,10 +127,15 @@ class MediaWatcher(threading.Thread):
 
     async def _read_cover(self, key, props):
         """The album cover as image bytes, read once per song. The app may switch the cover a
-        moment after the title, so a missing cover, or the previous song's, is retried a few times."""
-        if self.cover and self.cover[0] == key:
-            return
+        moment after the title, so a missing cover, or the previous song's, is retried a few times.
+        A music app that still has to download the picture can take longer: a song with no
+        cover yet is looked at again every ~5 s for 2 minutes (a cheap read when it's there)."""
         tries = self._cover_tries.get(key, 0) + 1
+        if self.cover and self.cover[0] == key:
+            settled = self.cover[1] is not None and self._cover_unsure != key
+            if settled or tries > COVER_LATE_TRIES or tries % COVER_LATE_EVERY:
+                self._cover_tries = {key: tries}
+                return
         self._cover_tries = {key: tries}
         data = None
         try:
@@ -139,6 +149,11 @@ class MediaWatcher(threading.Thread):
         stale = data is not None and data == self._last_cover
         if (data is None or stale) and tries < 6:
             return                                   # try again on the next poll (0.5 s)
+        if self.cover and self.cover[0] == key and (data is None or data == self.cover[1]):
+            return                                   # nothing new
+        # The previous song's picture may still be the app's old one (or the same album's):
+        # shown, but looked at again later in case the right one comes.
+        self._cover_unsure = key if stale else None
         self.cover = (key, data)
         if data is not None:
             self._last_cover = data
