@@ -32,6 +32,7 @@ class Lyrics:
         self.ai_lines: set[int] = set()   # translations written by Claude (see ai_translate)
         self.ai_checked = False
         self.ai_provider = None             # who wrote ai_lines
+        self.tr_note = ""                   # why lines were left untranslated (shown in the app)
         self.own_tr: dict[int, str] = {}    # your own translations (editor), never replaced
         # Fixing lyrics timed for another version of the song, by listening (see retime()):
         self.heard_starts: dict[int, float] = {}   # line index -> when it was actually sung

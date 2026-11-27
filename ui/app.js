@@ -341,6 +341,8 @@ async function loadLyrics() {
 
 function renderLyrics() {
   const box = $("#lyrics"), empty = $("#lyricsEmpty");
+  $("#trNote").hidden = !lyr.tr_note;                 // why this song has no translation
+  $("#trNote").textContent = lyr.tr_note || "";
   box.innerHTML = "";
   activeIdx = -2;
   box.classList.toggle("unsynced", !lyr.synced);

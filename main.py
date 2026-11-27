@@ -403,11 +403,10 @@ class App:
                     and ai_translate.has_key(self.settings["ai_provider"]))
 
     def _ai_fill(self, track, lyr):
-        """AI / machine translations for the lines no site translated (runs on the loading thread)."""
-        if not self._ai_wanted() or lyr.ai_checked:
+        """AI / machine translations for the lines no site translated (runs on the loading
+        thread). When lines are left untranslated, lyr.tr_note says why (shown on Now Playing)."""
+        if not self.settings["show_translation"] or lyr.ai_checked:
             return
-        lyr.ai_checked = True
-        lyr.ai_provider = self.settings["ai_provider"]
         texts = [t for _, t in lyr.lines]
         # Every line that isn't Chinese, in any language (also the English lines of a
         # mostly-Chinese song). In a Japanese song, kanji-only lines are Japanese too.
@@ -415,14 +414,33 @@ class App:
         want = [i for i, t in enumerate(texts)
                 if ai_translate.worth_translating(t, japanese) and not lyr.translations[i]]
         if not want:
+            lyr.tr_note = ""
             return
+        provider = self.settings["ai_provider"]
+        name = ai_translate.PROVIDERS.get(provider, ("Claude",))[0]
+        why = ("No lyrics site has a Chinese translation of this song" if not any(lyr.translations)
+               else f"{len(want)} line(s) have no translation on the lyrics sites")
+        if not self.settings["ai_translate"]:
+            lyr.tr_note = why + ". To fill them, turn on Settings → Chinese translation → Fill lines with no translation."
+            return
+        if not ai_translate.has_key(provider):
+            lyr.tr_note = (why + f". {name} needs an API key (Settings → Chinese translation), "
+                           "or choose free machine translation there.")
+            return
+        lyr.ai_checked = True
+        lyr.ai_provider = provider
+        if provider != "machine" and not all(texts[i] in ai_translate.known(track.title, track.artist, provider)
+                                             for i in want):
+            lyr.tr_note = f"Translating {len(want)} line(s) with {name}…"
         try:
             got = ai_translate.translate(track.title, track.artist, texts, lyr.translations, want,
-                                         provider=self.settings["ai_provider"])
+                                         provider=provider)
         except Exception as exc:
             self.ai_status = f"Translation failed: {str(exc)[:120]}"
             self._pending_flash = "Translation failed (see Settings)"
+            lyr.tr_note = f"{why}, and {name} couldn't translate them: {str(exc)[:160]}"
             return
+        lyr.tr_note = "" if got else f"{why}, and {name} sent back no translations. Try again later or choose another service."
         self.ai_status = f"Translated {len(got)} line(s) of the last song"
         for i, zh in got.items():
             if not lyr.translations[i]:

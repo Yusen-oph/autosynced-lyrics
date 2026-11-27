@@ -195,7 +195,8 @@ class AppServer:
         if lyr is None:
             return ""
         return (f"{id(lyr)}:{sum(1 for x in lyr.translations if x)}:{len(lyr.ai_lines)}:"
-                f"{sum(1 for c in lyr.char_times if c)}:{getattr(lyr, 'tr_edits', 0)}")
+                f"{sum(1 for c in lyr.char_times if c)}:{getattr(lyr, 'tr_edits', 0)}:"
+                f"{len(getattr(lyr, 'tr_note', ''))}")
 
     def _get_lyrics(self, q):
         app, t = self.app, self.app.watcher.track
@@ -206,6 +207,7 @@ class AppServer:
         shown = lyr.shown_times()            # music-break lines wait for the last word to end
         return {
             "rev": self._lyrics_rev(lyr), "synced": lyr.synced, "status": app.status,
+            "tr_note": getattr(lyr, "tr_note", "") if app.settings["show_translation"] else "",
             "lines": [{"t": round(shown[i], 3), "text": text,
                        "tr": (lyr.translations[i] or "") if tr_on else "",
                        "ai": i in lyr.ai_lines}

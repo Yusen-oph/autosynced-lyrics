@@ -287,6 +287,9 @@ def _ask_claude(model, ask, client):
         max_tokens=16000,
         system=SYSTEM,
         messages=[{"role": "user", "content": ask}],
+        # No thinking: translating lines doesn't need it, and thinking made a whole song take
+        # a minute or more. Each model turns it off its own way (Sonnet 5.5 400s on "disabled").
+        thinking={"type": "between_tools"} if model.startswith("claude-sonnet-5-5") else {"type": "disabled"},
         output_config={"effort": "low" if model == FEW_MODEL else "medium",
                        "format": {"type": "json_schema", "schema": _SCHEMA}},
     )
