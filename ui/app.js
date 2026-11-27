@@ -259,6 +259,8 @@ function renderNow() {
   const v = open ? now.song_fix || 0 : 0;
   $("#nudgeVal").textContent = v ? `Timing ${v > 0 ? "+" : ""}${v.toFixed(2)} s` : "Timing 0.00 s";
   $("#btnBar span").textContent = now.bar_hidden ? "Show lyrics bar" : "Hide lyrics bar";
+  $("#btnWall span").textContent = now.wall_on ? "Wallpaper lyrics: on" : "Wallpaper lyrics: off";
+  $("#btnWall").classList.toggle("on", !!now.wall_on);
   if (now.cover && typeof now.cover === "object") coverCfg = now.cover;
   applyCover($("#record"), coverCfg, open && now.playing);
   const pv = $(".cover-preview .record");
@@ -484,6 +486,15 @@ $("#btnEarlier").onclick = () => control("earlier").then(() => toast("This song'
 $("#btnLater").onclick = () => control("later").then(() => toast("This song's lyrics: 0.25 s later"));
 $("#btnEdit").onclick = () => now.open ? openEditor(now.title, now.artist) : openEditor();
 $("#btnBar").onclick = () => control("toggle_bar");
+$("#btnWall").onclick = async () => {
+  const on = !now.wall_on;
+  now.wall_on = on;                                   // show the new state at once
+  $("#btnWall span").textContent = on ? "Wallpaper lyrics: on" : "Wallpaper lyrics: off";
+  $("#btnWall").classList.toggle("on", on);
+  await control("toggle_wallpaper");
+  if (S && S.settings) S.settings.wall_lyrics = on;   // keep the Settings page in step
+  toast(on ? "Wallpaper lyrics on: they show on your desktop" : "Wallpaper lyrics off");
+};
 
 // ---------------------------------------------------------------- my lyrics
 async function loadLibrary() {

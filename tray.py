@@ -67,6 +67,7 @@ def start(events) -> pystray.Icon:
         pystray.MenuItem("Settings…", lambda: events.put("settings")),
         pystray.MenuItem("Edit / sync lyrics…", lambda: events.put("editor")),
         pystray.MenuItem("Show / hide lyrics", lambda: events.put("toggle")),
+        pystray.MenuItem("Wallpaper lyrics on / off", lambda: events.put("wallpaper")),
         pystray.MenuItem("Lock / unlock position", lambda: events.put("unlock")),
         pystray.MenuItem("Quit", lambda: events.put("quit")),
     )

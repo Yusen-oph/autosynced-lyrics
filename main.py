@@ -309,9 +309,17 @@ class App:
             m.add_command(label="AI translation usage & cost…",
                           command=lambda: usage_window.show(self.root))
         m.add_command(label="Hide lyrics", command=lambda: self.events.put("toggle"))
+        m.add_command(label=("✓ " if self.settings["wall_lyrics"] else "") + "Wallpaper lyrics",
+                      command=lambda: self.events.put("wallpaper"))
         m.add_separator()
         m.add_command(label="Quit", command=self.quit)
         m.tk_popup(x, y)
+
+    def toggle_wallpaper(self):
+        """Wallpaper lyrics on / off (tray, right-click menu, Now Playing button)."""
+        self.settings["wall_lyrics"] = not self.settings["wall_lyrics"]
+        self.settings_changed()
+        self.overlay.flash("Wallpaper lyrics on" if self.settings["wall_lyrics"] else "Wallpaper lyrics off")
 
     def quit(self):
         self.icon.stop()
@@ -342,6 +350,8 @@ class App:
                 self.settings_changed()
             elif ev == "toggle":
                 self.hidden_by_user = not self.hidden_by_user
+            elif ev == "wallpaper":
+                self.toggle_wallpaper()
             elif ev == "quit":
                 self.quit()
                 return

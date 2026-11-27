@@ -146,6 +146,7 @@ class AppServer:
             "cover_id": f"{abs(hash(cover[1])) if cover and cover[0] == t.key and cover[1] else ''}",
             "style": app.settings["ui_style"], "show_translation": app.settings["show_translation"],
             "bar_hidden": app.hidden_by_user, "can_seek": app.watcher.can_seek,
+            "wall_on": app.settings["wall_lyrics"],
             "cover": self._cover_style(), "goto": goto, "update": self._update_status(),
         }
 
@@ -235,6 +236,8 @@ class AppServer:
             self._run_on_app(app.open_editor)
         elif name == "toggle_bar":
             self._run_on_app(lambda: app.events.put("toggle"))
+        elif name == "toggle_wallpaper":
+            self._run_on_app(lambda: app.events.put("wallpaper"))
         else:
             raise ValueError("unknown control")
 
